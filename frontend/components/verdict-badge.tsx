@@ -11,8 +11,8 @@ import {
 import { cn } from "@/lib/utils";
 
 import type { ClaimView } from "@/lib/check-state";
-import type { Verdict } from "@/lib/types";
-import { TONE_CLASSES, VERDICT_INFO } from "@/lib/verdicts";
+import type { TimeFrame, Verdict } from "@/lib/types";
+import { TONE_CLASSES, VERDICT_INFO, verdictLabel } from "@/lib/verdicts";
 
 const VERDICT_ICONS: Record<Verdict, LucideIcon> = {
   fresh: CircleCheck,
@@ -28,9 +28,12 @@ const badgeBase =
 
 export function VerdictBadge({
   verdict,
+  timeFrame,
   className,
 }: {
   verdict: Verdict;
+  /** A past claim's verdict says whether it was right for its time. */
+  timeFrame?: TimeFrame | null;
   className?: string;
 }) {
   const info = VERDICT_INFO[verdict];
@@ -38,7 +41,7 @@ export function VerdictBadge({
   return (
     <span className={cn(badgeBase, TONE_CLASSES[info.tone].badge, className)}>
       <Icon className="size-3.5" aria-hidden />
-      {info.label}
+      {verdictLabel(verdict, timeFrame)}
     </span>
   );
 }

@@ -24,13 +24,22 @@ def triage(claims: list[Claim], max_claims: int) -> TriageResult:
     for claim in claims:
         if claim.kind in DERIVED_KINDS:
             derived.append(claim)
-        elif claim.category == "static" or not claim.time_sensitive:
+        elif claim.category == "static":
+            not_time_sensitive.append(claim)
+        elif claim.time_frame == "past":
+            # A value at a past time can't go stale, but it can be wrong for that
+            # time, so it is checked against that time rather than today.
+            candidates.append(claim)
+        elif not claim.time_sensitive:
             not_time_sensitive.append(claim)
         else:
             candidates.append(claim)
 
+    # Claims about now come first, fastest-changing first; history after them.
     # sorted() is stable, so ties keep the order of the answer.
-    by_urgency = sorted(candidates, key=lambda claim: HALF_LIFE_DAYS[claim.category])
+    by_urgency = sorted(
+        candidates, key=lambda claim: (claim.time_frame == "past", HALF_LIFE_DAYS[claim.category])
+    )
     return TriageResult(
         to_check=by_urgency[:max_claims],
         not_time_sensitive=not_time_sensitive,

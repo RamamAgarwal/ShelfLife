@@ -30,7 +30,7 @@ import type {
   LlmCallInfo,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { CATEGORY_LABELS, KIND_LABELS, TONE_CLASSES, VERDICT_INFO } from "@/lib/verdicts";
+import { CATEGORY_LABELS, KIND_LABELS, timeFrameLabel, TONE_CLASSES, VERDICT_INFO } from "@/lib/verdicts";
 
 function SourceIcon({ favicon }: { favicon: string | null }) {
   const [failed, setFailed] = useState(false);
@@ -213,7 +213,7 @@ function AffectedList({
 }) {
   return (
     <section aria-label="Earlier answers affected" className="flex flex-col gap-2 border-t pt-4">
-      <h3 className="flex items-center gap-1.5 text-sm font-medium">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold">
         <History className="size-3.5" aria-hidden />
         Also in {items.length} earlier {items.length === 1 ? "answer" : "answers"}
       </h3>
@@ -366,6 +366,37 @@ function Recalc({ result, views }: { result: ClaimResult; views: ClaimView[] }) 
   );
 }
 
+/** A detail written about a value that changed, such as the release date beside an old version. */
+function CoupledNote({
+  result,
+  views,
+  onSelect,
+}: {
+  result: ClaimResult;
+  views: ClaimView[];
+  onSelect?: (claimId: string) => void;
+}) {
+  const anchor = views.find((view) => view.claim.id === result.coupled_to);
+  const newValue = anchor?.result?.current_value;
+  return (
+    <section aria-label="Re-checked for the current value" className="flex flex-col gap-1.5 rounded-lg border p-3">
+      <p className="text-xs text-muted-foreground">
+        Describes{" "}
+        <button
+          type="button"
+          onClick={() => result.coupled_to && onSelect?.(result.coupled_to)}
+          className="rounded-sm font-mono text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {result.coupled_to}
+        </button>
+        {newValue ? <>, which is now {newValue}</> : null}. True on its own, but in this answer it
+        would describe the new value, so it was checked again as:
+      </p>
+      {result.checked_as && <p className="text-sm leading-6 font-medium">{result.checked_as}</p>}
+    </section>
+  );
+}
+
 function Decision({ result }: { result: ClaimResult }) {
   const decision = result.decision;
   if (!decision) return null;
@@ -425,16 +456,25 @@ export function ClaimDetail({
   const score = result?.freshness_score ?? null;
   const independent = result?.score_breakdown?.independent_sources ?? relevant.length;
   const contradicting = relevant.filter((source) => source.stance === "contradicts" && source.counted).length;
-  const showRecheck = result?.verdict === "fresh" || result?.verdict === "uncertain";
+  // History never needs re-checking; the time-frame note already says so.
+  const showRecheck =
+    (result?.verdict === "fresh" || result?.verdict === "uncertain") && claim.time_frame !== "past";
 
   return (
-    <article className="flex flex-col gap-4 p-4 sm:p-5" aria-label="Claim details">
+    <article className="flex min-w-0 flex-col gap-5 p-5 [overflow-wrap:anywhere] sm:p-6" aria-label="Claim details">
       <header className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          {result ? <VerdictBadge verdict={result.verdict} /> : <PendingBadge view={view} />}
+          {result ? (
+            <VerdictBadge verdict={result.verdict} timeFrame={claim.time_frame} />
+          ) : (
+            <PendingBadge view={view} />
+          )}
           <span className="text-xs text-muted-foreground">
             {CATEGORY_LABELS[claim.category]}
           </span>
+          {timeFrameLabel(claim) && (
+            <span className="rounded-md border px-1.5 py-0.5 text-xs">{timeFrameLabel(claim)}</span>
+          )}
           {claim.kind !== "fact" && (
             <span className="rounded-md border px-1.5 py-0.5 text-xs">{KIND_LABELS[claim.kind]}</span>
           )}
@@ -487,8 +527,21 @@ export function ClaimDetail({
         )}
       </header>
 
+      {claim.time_frame === "past" && result && result.verdict !== "not_time_sensitive" && (
+        <p className="rounded-lg border px-3 py-2 text-xs leading-5 text-muted-foreground" data-tour="time-frame-note">
+          This claim is about {claim.as_of ?? "a past time"}, so it was checked against that time: later changes
+          don&apos;t make it wrong, and it never needs re-checking.
+        </p>
+      )}
+      {result?.coupled_to && <CoupledNote result={result} views={allClaims} onSelect={onSelect} />}
       {result?.change && (
-        <WhatChanged change={result.change} category={claim.category} answerSaid={answerSaid} />
+        <WhatChanged
+          change={result.change}
+          // A detail (such as a release date) borrows its value's category for scoring,
+          // but what changed is the detail itself, not a version.
+          category={result.coupled_to ? "static" : claim.category}
+          answerSaid={answerSaid}
+        />
       )}
       {result && <Decision result={result} />}
       {result && <Recalc result={result} views={allClaims} />}
@@ -506,7 +559,9 @@ export function ClaimDetail({
           <dd className="text-sm leading-6">{answerSaid}</dd>
         </div>
         <div className="rounded-lg border p-3">
-          <dt className="mb-1 text-xs text-muted-foreground">Sources now say</dt>
+          <dt className="mb-1 text-xs text-muted-foreground">
+            {claim.time_frame === "past" ? `Sources say it was (${claim.as_of ?? "then"})` : "Sources now say"}
+          </dt>
           <dd className="text-sm leading-6">
             {!result ? (
               <Skeleton className="mt-1.5 h-4 w-3/4" />
@@ -526,7 +581,7 @@ export function ClaimDetail({
           {score === null && <ScoreBreakdownPopover result={result} />}
           {relevant.length > 0 && (
             <section aria-label="Evidence" className="flex flex-col gap-3 border-t pt-4">
-              <h3 className="flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
+              <h3 className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold">
                 Evidence
                 <span className="text-xs font-normal text-muted-foreground">
                   {relevant.length === 1 ? "1 source" : `${relevant.length} sources`}
@@ -543,7 +598,7 @@ export function ClaimDetail({
           <IgnoredSources sources={ignored} checkDate={checkDate} />
           {claim.depends_on.length > 0 && (
             <section aria-label="Relies on" className="flex flex-col gap-2 border-t pt-4">
-              <h3 className="text-sm font-medium">
+              <h3 className="text-sm font-semibold">
                 Relies on
                 {result.affected_by.length > 0 && (
                   <span className="text-xs font-normal text-muted-foreground">

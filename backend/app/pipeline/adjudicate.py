@@ -44,6 +44,26 @@ class AdjudicationOutput(BaseModel):
 
 
 @dataclass(frozen=True)
+class AnswerSetting:
+    """What a claim was said in: the question and the whole answer."""
+
+    question: str | None = None
+    answer: str | None = None
+
+    def passage(self, claim: Claim, limit: int = 500) -> str | None:
+        """The sentences around the claim, so it is read the way the answer meant it."""
+        if not self.answer or not claim.span:
+            return None
+        start, end = claim.span
+        left = max(self.answer.rfind(". ", 0, start), self.answer.rfind("\n", 0, start))
+        left = 0 if left < 0 else left + 1
+        right_candidates = [i for i in (self.answer.find(". ", end), self.answer.find("\n", end)) if i >= 0]
+        right = min(right_candidates) + 1 if right_candidates else len(self.answer)
+        text = " ".join(self.answer[left:right].split())
+        return text if len(text) <= limit else text[: limit - 1] + "\u2026"
+
+
+@dataclass(frozen=True)
 class Judgement:
     stance: Stance
     quote: str | None
@@ -71,11 +91,12 @@ async def adjudicate_claim(
     answer_date: date | None,
     metrics: MetricsCollector,
     context: CheckContext | None = None,
+    setting: AnswerSetting | None = None,
 ) -> Adjudication:
     settings = config.get_settings()
     result = await metrics.chat(
         "adjudicate",
-        build_messages(claim, sources, check_date, answer_date, context),
+        build_messages(claim, sources, check_date, answer_date, context, setting),
         settings.model_strong,
         settings.fallbacks_strong_list,
         json_schema=AdjudicationOutput,
@@ -100,6 +121,7 @@ def build_messages(
     check_date: date,
     answer_date: date | None,
     context: CheckContext | None = None,
+    setting: AnswerSetting | None = None,
 ) -> list[dict]:
     parts = [
         f"Today's date: {check_date.isoformat()}",
@@ -114,6 +136,19 @@ def build_messages(
             "The answer was written for this context. If the claim may be true in general "
             "but not for this context, say so in `context_note`."
         )
+    if setting and (setting.question or setting.passage(claim)):
+        lines = []
+        if setting.question:
+            lines.append(f"Question: {setting.question}")
+        if setting.passage(claim):
+            lines.append(f"Passage: {setting.passage(claim)}")
+        body = neutralise_tag(neutralise_tag("\n".join(lines), "setting"), "claim")
+        parts.append(
+            f"<setting>\n{body}\n</setting>\n"
+            "The claim comes from this passage of an answer to this question. Read the claim "
+            "the way the passage means it."
+        )
+    parts.append(_frame_line(claim, check_date))
     parts.append(f"<claim>\n{neutralise_tag(claim.text, 'claim')}\n</claim>")
     for index, source in enumerate(sources):
         parts.append(_evidence_block(evidence_id(index), source))
@@ -121,6 +156,21 @@ def build_messages(
         {"role": "system", "content": load_prompt("adjudicate")},
         {"role": "user", "content": "\n\n".join(parts)},
     ]
+
+
+def _frame_line(claim: Claim, check_date: date) -> str:
+    when = claim.as_of or (claim.as_of_date.isoformat() if claim.as_of_date else None)
+    if claim.time_frame == "past":
+        return (
+            f"Time frame: past. The claim describes how things were {f'as of {when}' if when else 'at the time it names'}. "
+            "Judge whether it was true then, not whether it is true today."
+        )
+    if claim.time_frame == "future":
+        return (
+            f"Time frame: future. The claim describes something planned or expected{f' for {when}' if when else ''}. "
+            f"Today is {check_date.isoformat()}: judge whether that is still the plan, or happened as described."
+        )
+    return "Time frame: current. The claim presents how things are today. Judge whether it is true today."
 
 
 def _evidence_block(identifier: str, source: SearchResult) -> str:

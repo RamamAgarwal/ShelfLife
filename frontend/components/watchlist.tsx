@@ -25,7 +25,7 @@ export function Watchlist({
   return (
     <section aria-labelledby={bare ? undefined : "watchlist-heading"} className={bare ? "flex flex-col" : "flex flex-col gap-3 border-t pt-6"}>
       <div className={bare ? "sr-only" : "flex flex-col gap-1"}>
-        <h2 id="watchlist-heading" className="flex items-center gap-1.5 text-sm font-medium">
+        <h2 id="watchlist-heading" className="flex items-center gap-1.5 text-sm font-semibold">
           <CalendarClock className="size-4" aria-hidden />
           Due for a re-check
         </h2>

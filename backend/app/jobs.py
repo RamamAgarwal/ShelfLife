@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from app import alerts, config, history
+from app import alerts, config, history, policies
 from app.models import CheckContext, CheckRequest, CheckResult
 from app.pipeline import orchestrator
 
@@ -153,6 +153,7 @@ class CheckStore:
                 context=context,
                 profile_id=request.profile_id,
                 profile_version=profile_version,
+                policy=policies.resolve(request.policy_id),
                 on_event=on_event,
             )
         except orchestrator.PipelineError as exc:

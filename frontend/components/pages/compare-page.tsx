@@ -44,7 +44,7 @@ function Result({ result }: { result: Comparison }) {
       </div>
       <ul className="flex flex-col gap-4">
         {result.clusters.map((cluster) => (
-          <li key={cluster.topic} className="flex flex-col gap-3 rounded-xl border p-4">
+          <li key={cluster.topic} className="flex flex-col gap-4 rounded-2xl border bg-card p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-sm font-medium">{cluster.topic}</p>
               <span className="text-xs text-muted-foreground">
@@ -135,12 +135,13 @@ export function ComparePage() {
             <Button
               variant="outline"
               size="sm"
+              data-tour="load-example"
               onClick={() => {
                 setQuestion(scenario.question);
                 setAnswers(scenario.answers!.map((item) => ({ ...item })));
               }}
             >
-              Load demo: {scenario.label}
+              Load example: {scenario.label}
             </Button>
           ) : undefined
         }
@@ -197,7 +198,7 @@ export function ComparePage() {
             <Plus aria-hidden />
             Add another app
           </Button>
-          <Button onClick={run} disabled={!ready || running}>
+          <Button onClick={run} disabled={!ready || running} data-tour="compare-run">
             {running ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden /> : <Scale aria-hidden />}
             Compare answers
           </Button>
@@ -205,7 +206,11 @@ export function ComparePage() {
         <ErrorNote message={error} />
       </Panel>
 
-      {result && <Result result={result} />}
+      {result && (
+        <div data-tour="compare-result">
+          <Result result={result} />
+        </div>
+      )}
 
       <Panel title="Earlier comparisons">
         {past.data?.comparisons.length ? (

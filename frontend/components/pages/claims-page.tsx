@@ -57,7 +57,7 @@ function PassportCard({ id }: { id: string }) {
         ))}
       </dl>
       <div className="flex flex-col gap-2 border-t pt-3">
-        <h3 className="text-sm font-medium">History</h3>
+        <h3 className="text-sm font-semibold">History</h3>
         <ul className="flex flex-col gap-1.5">
           {(data.history ?? []).slice().reverse().map((entry) => (
             <li key={entry.check_id} className="flex flex-wrap items-center gap-2 text-sm">
@@ -119,7 +119,7 @@ export function ClaimsPage() {
           {loading && !data && <Loading />}
           {data && data.claims.length === 0 && <EmptyState>No claims match.</EmptyState>}
           {data && data.claims.length > 0 && (
-            <ul className="flex flex-col divide-y rounded-xl border">
+            <ul className="flex flex-col divide-y rounded-2xl border bg-card">
               {data.claims.map((claim: Passport) => (
                 <li key={claim.id}>
                   <button

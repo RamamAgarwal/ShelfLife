@@ -36,8 +36,8 @@ export function DailyBars({
             >
               <span
                 className={cn(
-                  "block w-full rounded-t-[4px] bg-foreground/55 transition-colors",
-                  hover === index && "bg-foreground/80",
+                  "block w-full rounded-t-[5px] bg-brand/55 transition-colors",
+                  hover === index && "bg-brand",
                 )}
                 style={{ height: day.checks ? `${(day.checks / max) * 100}%` : "0" }}
               />

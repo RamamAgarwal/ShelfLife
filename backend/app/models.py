@@ -38,6 +38,10 @@ ClaimKind = Literal[
     "fact", "assumption", "calculation", "recommendation", "api_usage", "availability"
 ]
 DERIVED_KINDS = ("calculation", "recommendation")
+# When a claim applies. current: the answer presents it as how things are now.
+# past: how things were at a stated time ("in 2019", "at launch"), which later changes
+# can't make wrong. future: something planned, scheduled or expected.
+TimeFrame = Literal["current", "past", "future"]
 
 # Country names Tavily accepts for its country option (lowercase).
 TAVILY_COUNTRIES = (
@@ -109,6 +113,15 @@ class Claim(BaseModel):
     number: float | None = None
     # Stable id for the same claim across checks: its verification record.
     passport_id: str | None = None
+    # The timeline the claim belongs to, read from the whole question and answer.
+    time_frame: TimeFrame = "current"
+    # The time it describes as the answer puts it ("October 2019"), and that period's last day.
+    as_of: str | None = None
+    as_of_date: date | None = None
+
+    @property
+    def historical(self) -> bool:
+        return self.time_frame == "past"
 
 
 class Evidence(BaseModel):
@@ -214,6 +227,11 @@ class ClaimResult(BaseModel):
     decision: DecisionInfo | None = None
     # Set when the claim may be true in general but not for the given context.
     context_note: str | None = None
+    # Set when this claim is a detail of another claim's value (such as the release
+    # date of "the latest version") and that value turned out to be stale: the detail
+    # was re-checked for the current value, and this is the claim as it was checked.
+    coupled_to: str | None = None
+    checked_as: str | None = None
 
 
 class Metrics(BaseModel):
@@ -252,6 +270,10 @@ class AnswerEdit(BaseModel):
     before: str
     after: str
     citation: int | None
+    # Every claim this edit corrects. Claims whose passages overlap, such as a version
+    # and the release date written next to it, are corrected together in one edit.
+    claim_ids: list[str] = []
+    citations: list[int] = []
 
 
 class Rewrite(BaseModel):
@@ -279,6 +301,10 @@ class CheckResult(BaseModel):
     context: CheckContext | None = None
     profile_id: str | None = None
     profile_version: int | None = None
+    # The freshness policy the check was scored with.
+    policy_id: str | None = None
+    # Set when the check was started by the autonomous agent rather than a person.
+    trigger: str | None = None
 
 
 class CheckRequest(BaseModel):
@@ -291,6 +317,8 @@ class CheckRequest(BaseModel):
     context: CheckContext | None = None
     # A saved context profile. Its context is used, and later changes to it are tracked.
     profile_id: str | None = None
+    # A freshness policy: how fast each kind of fact goes stale for this app.
+    policy_id: str | None = None
 
     @field_validator("question", mode="before")
     @classmethod

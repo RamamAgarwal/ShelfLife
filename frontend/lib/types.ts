@@ -41,7 +41,13 @@ export interface Claim {
   formula: string | null;
   number: number | null;
   passport_id: string | null;
+  /** Which timeline the claim belongs to. Past claims are judged as of their own time. */
+  time_frame?: TimeFrame;
+  as_of?: string | null;
+  as_of_date?: string | null;
 }
+
+export type TimeFrame = "current" | "past" | "future";
 
 export interface CheckContext {
   country?: string | null;
@@ -142,6 +148,10 @@ export interface ClaimResult {
   recalculation: Recalculation | null;
   decision: DecisionInfo | null;
   context_note: string | null;
+  /** Set when this claim describes another claim's value that turned out stale. */
+  coupled_to?: string | null;
+  /** The claim as it was checked: restated about the current value. */
+  checked_as?: string | null;
 }
 
 export interface FallbackEvent {
@@ -196,6 +206,9 @@ export interface AnswerEdit {
   before: string;
   after: string;
   citation: number | null;
+  /** Every claim this edit corrects; overlapping claims are corrected together. */
+  claim_ids?: string[];
+  citations?: number[];
 }
 
 export interface Rewrite {
@@ -222,6 +235,8 @@ export interface CheckResult {
   context: CheckContext | null;
   profile_id: string | null;
   profile_version: number | null;
+  policy_id?: string | null;
+  trigger?: string | null;
 }
 
 export interface TimelineEntry {
@@ -263,6 +278,7 @@ export interface CheckRequest {
   use_cache?: boolean;
   context?: CheckContext | null;
   profile_id?: string | null;
+  policy_id?: string | null;
 }
 
 export interface Budget {
@@ -520,4 +536,187 @@ export interface EvaluationData {
     avg_cost_usd: number | null;
   };
   meta?: { run_date: string; model_fast: string; model_strong: string; cache_hit_rate: number | null };
+}
+
+// --- freshness over time: policies, documents, impact, graph, autopilot ------------
+
+export type PolicyCategory = Exclude<Category, "static">;
+
+export interface FreshnessPolicy {
+  id: string;
+  name: string;
+  description: string;
+  preset: boolean;
+  half_life_days: Partial<Record<PolicyCategory, number>>;
+  recheck_days: Partial<Record<PolicyCategory, number>>;
+  withhold_categories: PolicyCategory[];
+  withhold_ratio: number;
+  effective_half_life_days: Record<PolicyCategory, number>;
+  category_labels: Record<PolicyCategory, string>;
+}
+
+export interface PoliciesResponse {
+  default: string;
+  policies: FreshnessPolicy[];
+}
+
+export type DocumentKind = "proposal" | "projection" | "email" | "report" | "recommendation" | "other";
+export type DocumentStatus = "current" | "needs_update" | "unverified";
+export type LinkStatus = Verdict | "unchecked";
+
+export interface DocumentLink {
+  claim_id: string;
+  text: string;
+  kind: ClaimKind;
+  span: [number, number] | null;
+  passport_id: string | null;
+  declared: boolean;
+  status: LinkStatus;
+  claimed_value: string | null;
+  current_value: string | null;
+  explanation: string;
+  checked_at: string | null;
+}
+
+export interface DocumentRevision {
+  at: string;
+  by: "autopilot" | "user";
+  previous_text: string;
+  changes: { claim: string; old: string | null; new: string | null }[];
+}
+
+export interface DocumentView {
+  id: string;
+  title: string;
+  kind: DocumentKind;
+  text: string;
+  original_text: string;
+  source_check_id: string | null;
+  declared: string[];
+  revisions: DocumentRevision[];
+  created_at: string;
+  updated_at: string;
+  status: DocumentStatus;
+  links: DocumentLink[];
+  stale: number;
+  unchecked: number;
+  corrected_text: string;
+  edits: AnswerEdit[];
+  citations: Citation[];
+  analyzed_at: string;
+}
+
+export interface ImpactClaim {
+  passport_id: string;
+  text: string | null;
+  checked_as?: string | null;
+  kind?: ClaimKind;
+  category?: Category;
+  status: Verdict | "unknown";
+  current_value?: string | null;
+  change?: ChangeInfo | null;
+  last_checked?: string | null;
+}
+
+export interface ImpactDependent extends ImpactClaim {
+  relation: "relies_on" | "describes" | "declared";
+  note: string;
+  via: string;
+  depth: number;
+  path: string[];
+}
+
+export interface ImpactDocument {
+  id: string;
+  title: string;
+  kind: DocumentKind;
+  via: string;
+  direct: boolean;
+  depth: number;
+  passages: string[];
+  declared: boolean;
+}
+
+export interface ImpactAnswer {
+  check_id: string;
+  question: string | null;
+  answer_excerpt: string;
+  checked_at: string;
+  via: string;
+  direct: boolean;
+  guard: Guard["action"] | null;
+}
+
+export interface ImpactReport {
+  claim: ImpactClaim;
+  severity: "none" | "low" | "medium" | "high";
+  dependents: ImpactDependent[];
+  documents: ImpactDocument[];
+  answers: ImpactAnswer[];
+  counts: { claims: number; documents: number; answers: number; total: number };
+}
+
+export interface GraphNode {
+  id: string;
+  type: "claim" | "document";
+  label: string;
+  status: Verdict | "unknown" | "document";
+  category: string | null;
+  kind: ClaimKind | null;
+  current_value: string | null;
+  reach?: number;
+  answers?: number;
+  degree: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relation: "relies_on" | "describes" | "declared" | "used_in";
+  note: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  hot: GraphNode[];
+  stats: { claims: number; documents: number; edges: number; stale: number; shown: number };
+}
+
+export interface DeclaredEdge {
+  id: string;
+  upstream: string;
+  downstream: string;
+  note: string;
+  created_at: string;
+}
+
+export type AutopilotMode = "manual" | "auto";
+
+export interface AgentEvent {
+  id: string;
+  at: string;
+  cycle: string;
+  kind: "cycle" | "links" | "recheck" | "document" | "impact" | "test";
+  level: "info" | "warning" | "success";
+  title: string;
+  detail: string;
+  ref: { type: "check" | "document" | "claim" | "test"; id: string } | null;
+}
+
+export interface AutopilotStatus {
+  mode: AutopilotMode;
+  interval_seconds: number;
+  max_checks_per_cycle: number;
+  running: boolean;
+  last_cycle: { id: string; trigger: string; started_at: string; finished_at: string; actions: number } | null;
+  next_cycle_at: string | null;
+  pending: {
+    due_answers: number;
+    links_to_visit: number;
+    documents_to_update: number;
+    documents_to_verify: number;
+    tests_due: number;
+  };
+  events: AgentEvent[];
 }

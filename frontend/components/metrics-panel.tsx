@@ -112,7 +112,7 @@ export function MetricsPanel({
   return (
     <section aria-labelledby="metrics-heading" className="flex flex-col gap-4 px-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 id="metrics-heading" className="text-sm font-medium">
+        <h2 id="metrics-heading" className="text-sm font-semibold">
           Run metrics{" "}
           {running && <span className="font-normal text-muted-foreground">· updating</span>}
         </h2>

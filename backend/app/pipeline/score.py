@@ -171,17 +171,18 @@ def verdict_change_date(
     check_date: date,
     params: ScoreParams = DEFAULT_PARAMS,
     horizon_days: int = RECHECK_HORIZON_DAYS,
+    half_life_days: int | None = None,
 ) -> date | None:
     """The first day a fresh or uncertain verdict would change if no new evidence
     appeared, as its sources age. None if it won't change within the horizon.
     """
-    current = score_claim(sources, category, check_date, params=params).verdict
+    current = score_claim(sources, category, check_date, half_life_days, params).verdict
     if current not in ("fresh", "uncertain"):
         return None
 
     def changed(days: int) -> bool:
         day = check_date + timedelta(days=days)
-        return score_claim(sources, category, day, params=params).verdict != current
+        return score_claim(sources, category, day, half_life_days, params).verdict != current
 
     # Step a week at a time, then find the exact day within that week.
     for week_end in range(RECHECK_STEP_DAYS, horizon_days + RECHECK_STEP_DAYS, RECHECK_STEP_DAYS):
@@ -195,12 +196,15 @@ def verdict_change_date(
     return None
 
 
-def answer_score(scored_claims: Iterable[tuple[str, int]]) -> int | None:
+def answer_score(
+    scored_claims: Iterable[tuple[str, int]], half_lives: dict[str, int] | None = None
+) -> int | None:
     """Weighted mean of (category, score) pairs. Faster-changing claims count more."""
+    half_lives = half_lives or HALF_LIFE_DAYS
     weighted = 0.0
     total_weight = 0.0
     for category, score in scored_claims:
-        weight = 1 / HALF_LIFE_DAYS[category]
+        weight = 1 / half_lives.get(category, HALF_LIFE_DAYS[category])
         weighted += weight * score
         total_weight += weight
     return round(weighted / total_weight) if total_weight else None

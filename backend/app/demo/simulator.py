@@ -39,6 +39,27 @@ FACTS_ANSWER = (
     "Acme's spring sale is still running."
 )
 
+RELEASE_QUESTION = "What is the latest stable version of the Orion runtime, and which versions are no longer supported?"
+RELEASE_ANSWER = (
+    "The latest stable release of the Orion runtime is version 4.2, launched on March 4, 2025. "
+    "Orion 1.x and 2.x are no longer supported."
+)
+
+
+def long_date(days: int) -> str:
+    """A date written the way answers write it, such as "March 4, 2025"."""
+    day = date.today() - timedelta(days=days)
+    return f"{day:%B} {day.day}, {day.year}"
+
+
+ORION_44_RELEASED = 41
+
+HISTORY_QUESTION = "What was the latest Orion runtime release in June 2025, and what did Acme Cloud's Starter plan cost then?"
+HISTORY_ANSWER = (
+    "In June 2025, the latest stable release of the Orion runtime was version 4.2. At that time, "
+    "Acme Cloud's Starter plan cost $10 per month. Today the latest Orion release is version 4.2."
+)
+
 VAULT_QUESTION = "How many users can an Acme Vault workspace have, and what does it cost?"
 VAULT_ANSWERS = [
     {"app": "Sales assistant", "answer": "Acme Vault supports up to 10,000 users per workspace and costs $12 per user per month."},
@@ -61,6 +82,22 @@ SCENARIOS = [
         "description": "Every kind of verdict: stale, uncertain, fresh, unverified and couldn't check.",
         "question": FACTS_QUESTION,
         "answer": FACTS_ANSWER,
+        "context": None,
+    },
+    {
+        "id": "release",
+        "label": "Release notes",
+        "description": "A version that moved on, the release date written beside it, and a support list that grew.",
+        "question": RELEASE_QUESTION,
+        "answer": RELEASE_ANSWER,
+        "context": None,
+    },
+    {
+        "id": "history",
+        "label": "Timeline question",
+        "description": "Claims about June 2025 judged as of June 2025, beside the same fact claimed for today.",
+        "question": HISTORY_QUESTION,
+        "answer": HISTORY_ANSWER,
         "context": None,
     },
     {
@@ -126,6 +163,127 @@ FACTS_EXTRACTION = [
 ]
 
 
+RELEASE_EXTRACTION = [
+    claim("o1", "fact", "The latest stable release of the Orion runtime is version 4.2.",
+          "The latest stable release of the Orion runtime is version 4.2", "version_api",
+          ["Orion runtime latest stable release"], ("Orion runtime", "Orion"), number=4.2, official=["orion.example"]),
+    # A detail of o1's value: true forever on its own, wrong once "4.2" becomes "4.4".
+    claim("o2", "fact", "Orion 4.2 was launched on March 4, 2025.",
+          "version 4.2, launched on March 4, 2025", "static", ["Orion 4.2 release date"],
+          ("Orion runtime", "Orion"), depends_on=["o1"]),
+    claim("o3", "fact", "As of today, Orion 1.x and 2.x are the versions that no longer receive support.",
+          "Orion 1.x and 2.x are no longer supported", "product_status",
+          ["Orion runtime end of life versions"], ("Orion runtime", "Orion"), official=["orion.example"]),
+]
+
+
+HISTORY_EXTRACTION = [
+    # True for its time: 4.3 only came out in September 2025.
+    claim("h1", "fact", "In June 2025, the latest stable release of the Orion runtime was version 4.2.",
+          "In June 2025, the latest stable release of the Orion runtime was version 4.2", "version_api",
+          ["Orion runtime release history"], ("Orion runtime", "Orion"), number=4.2, official=["orion.example"],
+          time_frame="past", as_of="June 2025", as_of_date="2025-06"),
+    # Wrong even then: the price history says $8 until August 2025.
+    claim("h2", "fact", "In June 2025, Acme Cloud's Starter plan cost $10 per month.",
+          "At that time, Acme Cloud's Starter plan cost $10 per month", "pricing",
+          ["Acme Cloud Starter plan price history"], ("Acme Cloud", "Acme"), number=10,
+          time_frame="past", as_of="June 2025", as_of_date="2025-06"),
+    # The same fact as h1, but claimed for today: stale.
+    claim("h3", "fact", "The latest stable release of the Orion runtime is version 4.2.",
+          "Today the latest Orion release is version 4.2", "version_api",
+          ["Orion runtime latest stable release"], ("Orion runtime", "Orion"), number=4.2, official=["orion.example"]),
+]
+
+
+def document_extraction(text: str) -> list[dict]:
+    """Claims in the seeded documents, found by pattern so corrected versions work too."""
+    found: list[dict] = []
+
+    def add(pattern: str, build) -> re.Match | None:
+        match = re.search(pattern, text)
+        if match:
+            found.append(build(match))
+        return match
+
+    price = add(r"Nimbus Cloud's Starter plan costs \$(\d+) per seat per month", lambda m: claim(
+        "d-price", "fact", f"Nimbus Cloud's Starter plan costs ${m.group(1)} per seat per month.", m.group(0),
+        "pricing", ["Nimbus Cloud Starter plan price"], ("Nimbus Cloud", "Nimbus"), number=float(m.group(1)),
+        official=["nimbus.example"]))
+    add(r"Nimbus Cloud is available in India", lambda m: claim(
+        "d-region", "availability", "Nimbus Cloud is available in India.", m.group(0), "product_status",
+        ["Nimbus Cloud regions"], ("Nimbus Cloud", "Nimbus")))
+    add(r"your team of 10 fits the Starter plan", lambda m: claim(
+        "d-seats", "fact", "Nimbus Cloud's Starter plan allows at least 10 seats.", m.group(0), "product_status",
+        ["Nimbus Cloud Starter plan seat limit"], ("Nimbus Cloud", "Nimbus"), number=10))
+    add(r"Starter plan now allows up to (\d+) seats", lambda m: claim(
+        "d-seats", "fact", f"Nimbus Cloud's Starter plan allows up to {m.group(1)} seats.", m.group(0),
+        "product_status", ["Nimbus Cloud Starter plan seat limit"], ("Nimbus Cloud", "Nimbus"),
+        number=float(m.group(1))))
+    add(r"call (nimbus\.[\w.]+\(app\))", lambda m: claim(
+        "d-api", "api_usage", f"{m.group(1)} is the current way to deploy with the Nimbus SDK.", m.group(0),
+        "version_api", ["Nimbus SDK deploy method"], ("Nimbus SDK", "Nimbus")))
+    if price:
+        add(r"Nimbus Cloud is the cheapest option for your 10-person team", lambda m: claim(
+            "d-pick", "recommendation", "Nimbus Cloud is the cheapest option for a 10-person startup.",
+            m.group(0), "pricing", entities=("Nimbus Cloud",),
+            depends_on=["d-price"] + (["d-region"] if "available in India" in text else [])))
+        add(r"\$([\d,]+) a year", lambda m: claim(
+            "d-year", "calculation", f"For 10 seats over 12 months, Nimbus Cloud costs ${m.group(1)} a year.",
+            m.group(0), "pricing", entities=("Nimbus Cloud",), depends_on=["d-price"],
+            formula="{d-price} * 10 * 12", number=float(m.group(1).replace(",", ""))))
+    add(r"Orion runtime (\d+\.\d+), the latest stable release", lambda m: claim(
+        "d-orion", "fact", f"The latest stable release of the Orion runtime is version {m.group(1)}.", m.group(0),
+        "version_api", ["Orion runtime latest stable release"], ("Orion runtime", "Orion"),
+        number=float(m.group(1)), official=["orion.example"]))
+    add(r"Acme SDK (\d+\.\d+)", lambda m: claim(
+        "d-sdk", "fact", f"The latest Acme SDK is version {m.group(1)}.", m.group(0), "version_api",
+        ["Acme SDK latest version"], number=float(m.group(1))))
+    return found
+
+
+SEED_DOCUMENTS = [
+    {
+        "title": "Kestrel Labs hosting proposal",
+        "kind": "proposal",
+        "text": (
+            "Proposal for Kestrel Labs. We recommend Nimbus Cloud. Nimbus Cloud is the cheapest option for "
+            "your 10-person team. Nimbus Cloud's Starter plan costs $20 per seat per month, and Nimbus Cloud "
+            "is available in India, close to your users."
+        ),
+    },
+    {
+        "title": "FY hosting budget projection",
+        "kind": "projection",
+        "text": (
+            "Hosting budget. Nimbus Cloud's Starter plan costs $20 per seat per month. With 10 seats for 12 "
+            "months, hosting comes to $2,400 a year, which fits the approved budget."
+        ),
+    },
+    {
+        "title": "Welcome email to Priya at Kestrel Labs",
+        "kind": "email",
+        "text": (
+            "Hi Priya, as discussed, Nimbus Cloud's Starter plan costs $20 per seat per month, and your team "
+            "of 10 fits the Starter plan. To deploy, call nimbus.deploy(app) from the Nimbus SDK. Best, Sam"
+        ),
+    },
+    {
+        "title": "Platform upgrade plan",
+        "kind": "report",
+        "text": (
+            "Our services run on the Orion runtime 4.2, the latest stable release, and integrate through the "
+            "Acme SDK 3.2. No upgrade work is planned this quarter."
+        ),
+    },
+]
+
+# Declared links between claims from different answers: the SDK targets the runtime.
+SEED_EDGES = [
+    ("The latest stable release of the Orion runtime is version 4.2.", "The latest Acme SDK is version 3.2.",
+     "Acme SDK releases target the latest Orion runtime."),
+]
+
+
 def vault_extraction(answer: str) -> list[dict]:
     users = re.search(r"up to ([\d,]+) users", answer)
     price = re.search(r"\$(\d+) per user", answer)
@@ -184,6 +342,23 @@ def search_results() -> dict[str, list[dict]]:
         "Acme spring sale": [result("https://acme.example/sale", "The Acme spring sale is running now.", 39, "Spring sale")],
         "Acme Vault users per workspace limit": [result("https://acme.example/vault/limits", "Each Acme Vault workspace supports up to 8,000 users.", 12, "Vault limits")],
         "Acme Vault price per user": [result("https://acme.example/vault/pricing", "Acme Vault costs $15 per user per month.", 8, "Vault pricing")],
+        "Orion runtime latest stable release": [
+            result("https://orion.example/releases", "Orion 4.4 is the latest stable release of the Orion runtime.", 30, "Orion releases", 0.95),
+            result("https://devnotes.example/orion", "The latest stable release of the Orion runtime is version 4.2.", 320, "Orion runtime notes", 0.6),
+        ],
+        "Orion 4.4 release date": [
+            result("https://orion.example/blog/orion-4-4", f"Orion 4.4 was released on {long_date(ORION_44_RELEASED)}, with faster startup.", ORION_44_RELEASED, "Orion 4.4 is out", 0.95),
+        ],
+        "Orion runtime release history": [
+            result("https://orion.example/history", f"Release history: Orion 4.2 (March 4, 2025), Orion 4.3 (September 2, 2025), Orion 4.4 ({long_date(ORION_44_RELEASED)}).", 30, "Orion release history", 0.95),
+            result("https://orion.example/releases", "Orion 4.4 is the latest stable release of the Orion runtime.", 30, "Orion releases", 0.9),
+        ],
+        "Acme Cloud Starter plan price history": [
+            result("https://acme.example/pricing/history", "Starter plan price history: $8 per month from 2023 to August 2025, $10 per month from September 2025, and $25 per month since this spring.", 4, "Acme price history", 0.95),
+        ],
+        "Orion runtime end of life versions": [
+            result("https://orion.example/lifecycle", "End of life: Orion 1.x, 2.x and 3.x. Supported: Orion 4.x only.", 20, "Orion lifecycle", 0.95),
+        ],
     }
 
 
@@ -208,6 +383,28 @@ def one(eid, stance, quote):
 
 def adjudicate(claim_text: str, context: str) -> Any:
     text = claim_text
+    # Claims about June 2025 are judged against June 2025: later releases don't count against them.
+    if text.startswith("In June 2025, the latest stable release of the Orion runtime was version"):
+        stated = re.search(r"version (\d+\.\d+)", text).group(1)
+        stance = "supports" if stated == "4.2" else "contradicts"
+        reply = {"judgements": [one("E1", stance, "Orion 4.2 (March 4, 2025), Orion 4.3 (September 2, 2025)"),
+                                one("E2", "irrelevant", None)],
+                 "current_value": "version 4.2",
+                 "explanation": "The release history shows 4.2 was the newest release until 4.3 in September 2025."}
+        if stance == "contradicts":
+            reply.update(claimed_value=f"version {stated}", change_type="value_changed")
+        return reply
+    if text.startswith("In June 2025, Acme Cloud's Starter plan cost"):
+        return {"judgements": [one("E1", "contradicts", "$8 per month from 2023 to August 2025")],
+                "current_value": "$8 per month", "claimed_value": "$10 per month", "change_type": "value_changed",
+                "explanation": "The price history shows $8 per month until August 2025; $10 only applied from September 2025."}
+    if "Nimbus Cloud's Starter plan costs $28" in text:
+        return {"judgements": [one("E1", "supports", "Nimbus Cloud Starter plan: $28 per seat per month"),
+                               one("E2", "supports", "raises its Starter plan to $28 per seat per month"),
+                               one("E3", "supports", "raises its Starter plan to $28 per seat per month"),
+                               one("E4", "irrelevant", None)],
+                "current_value": "$28 per seat per month", "change_type": "no_change",
+                "explanation": "The official pricing page lists $28 per seat."}
     if "Nimbus Cloud's Starter plan costs" in text:
         return {"judgements": [one("E1", "contradicts", "Nimbus Cloud Starter plan: $28 per seat per month"),
                                one("E2", "contradicts", "raises its Starter plan to $28 per seat per month"),
@@ -224,6 +421,37 @@ def adjudicate(claim_text: str, context: str) -> Any:
         return {"judgements": [one("E1", "supports", "Nimbus Cloud regions: Mumbai (India)")],
                 "current_value": "Available in India (Mumbai region)", "context_note": note,
                 "explanation": "Nimbus lists a Mumbai region."}
+    if "nimbus.deployments.create" in text:
+        return {"judgements": [one("E1", "supports", "Use nimbus.deployments.create(app) instead")],
+                "current_value": "nimbus.deployments.create(app)", "change_type": "no_change",
+                "explanation": "The SDK changelog names this as the way to deploy."}
+    if "allows up to 5 seats" in text:
+        return {"judgements": [one("E1", "supports", "The Starter plan supports up to 5 seats")],
+                "current_value": "Up to 5 seats", "explanation": "The plans page lists a 5-seat cap."}
+    if "Orion runtime is version" in text:
+        if "4.4" in text:
+            return {"judgements": [one("E1", "supports", "Orion 4.4 is the latest stable release of the Orion runtime"),
+                                   one("E2", "irrelevant", None)],
+                    "current_value": "version 4.4", "explanation": "The release page lists 4.4 as the latest."}
+        return {"judgements": [one("E1", "contradicts", "Orion 4.4 is the latest stable release of the Orion runtime"),
+                               one("E2", "supports", "The latest stable release of the Orion runtime is version 4.2")],
+                "current_value": "version 4.4", "claimed_value": "version 4.2", "change_type": "superseded",
+                "explanation": "The official release page lists Orion 4.4 as the latest stable release."}
+    if "Orion 4.4 was launched on" in text:
+        released = long_date(ORION_44_RELEASED)
+        stance = "supports" if released in text else "contradicts"
+        reply = {"judgements": [one("E1", stance, f"Orion 4.4 was released on {released}")],
+                 "current_value": released, "explanation": "The Orion blog gives the 4.4 release date."}
+        if stance == "contradicts":
+            reply.update(claimed_value=re.search(r"launched on (.+?)\.?$", text).group(1), change_type="value_changed")
+        return reply
+    if "no longer receive support" in text:
+        if "3.x" in text:
+            return {"judgements": [one("E1", "supports", "End of life: Orion 1.x, 2.x and 3.x")],
+                    "current_value": "1.x, 2.x and 3.x", "explanation": "The lifecycle page agrees."}
+        return {"judgements": [one("E1", "contradicts", "End of life: Orion 1.x, 2.x and 3.x")],
+                "current_value": "1.x, 2.x and 3.x", "claimed_value": "1.x and 2.x", "change_type": "value_changed",
+                "explanation": "The lifecycle page now lists 3.x as end of life too."}
     if "nimbus.deploy" in text:
         return {"judgements": [one("E1", "contradicts", "nimbus.deploy() is deprecated. Use nimbus.deployments.create(app) instead")],
                 "current_value": "nimbus.deployments.create(app)", "claimed_value": "nimbus.deploy(app)",
@@ -272,17 +500,36 @@ def adjudicate(claim_text: str, context: str) -> Any:
         return {"judgements": [one("E1", "contradicts", "Acme Vault costs $15 per user per month")],
                 "current_value": "$15 per user per month", "claimed_value": re.search(r"\$\d+ per user per month", text).group(),
                 "change_type": "value_changed", "explanation": "The pricing page lists $15."}
-    return {"judgements": [], "current_value": None, "explanation": "The demo has no sources for this claim."}
+    return {"judgements": [], "current_value": None, "explanation": "No source states a value for this claim."}
 
 
 def extraction_for(answer: str) -> list[dict]:
-    if "Nimbus Cloud" in answer:
+    if answer == CLOUD_ANSWER:
         return CLOUD_EXTRACTION
+    if answer == RELEASE_ANSWER:
+        return RELEASE_EXTRACTION
+    if answer == HISTORY_ANSWER:
+        return HISTORY_EXTRACTION
     if "Acme Vault" in answer:
         return vault_extraction(answer)
     if "Acme Cloud costs" in answer:
         return FACTS_EXTRACTION
-    return []
+    return document_extraction(answer)
+
+
+def retarget_reply(full: str) -> dict:
+    """Restate each detail about the current value, by swapping the version number."""
+    items = []
+    pattern = r'<item id="(c\d+)">\nvalue claim: .*?\nvalue as stated: (.*?)\ncurrent value: (.*?)\ndetail claim: (.*?)\n</item>'
+    for cid, stated, current, detail in re.findall(pattern, full, re.S):
+        old, new = _NUMBER.search(stated), _NUMBER.search(current)
+        if not old or not new or old.group() not in detail:
+            items.append({"id": cid, "transfers": False, "text": "", "search_queries": []})
+            continue
+        text = detail.replace(old.group(), new.group())
+        subject = text.split(" was ")[0] if " was " in text else text
+        items.append({"id": cid, "transfers": True, "text": text, "search_queries": [f"{subject} release date"]})
+    return {"items": items}
 
 
 def generated_answer(question: str) -> str:
@@ -298,6 +545,8 @@ _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
 
 def rewrite_passage(original: str, current: str) -> str:
+    if "fits the Starter plan" in original:
+        return "the Starter plan now allows up to 5 seats, so your team of 10 needs the Team plan"
     if "cheapest option" in original:
         return "Stratus Cloud is now the cheaper option, at $25 per seat per month"
     if current.startswith("-") and _NUMBER.search(original):
@@ -310,6 +559,28 @@ def rewrite_passage(original: str, current: str) -> str:
     if code and "(" in current:
         return original[: code.start()] + current + original[code.end():]
     return current
+
+
+def rewrite_reply(full: str) -> list[dict]:
+    """One replacement per passage: each stated value swapped for its current one."""
+    replies = []
+    for cid, body in re.findall(r'<passage id="([\w-]+)">\n(.*?)\n</passage>', full, re.S):
+        lines = body.split("\n")
+        original = lines[0].removeprefix("original: ")
+        facts = [re.match(r"fact: .*?(?: \| stated: (.*?))? \| (?:now|value at that time \(.*?\)): (.*)$", line)
+                 for line in lines[1:]]
+        facts = [fact for fact in facts if fact]
+        text = original
+        for fact in facts:
+            stated, now = fact.groups()
+            if now.startswith(("keep unchanged", "unknown")):
+                continue
+            if stated and stated in text:
+                text = text.replace(stated, now, 1)
+            else:
+                text = rewrite_passage(text, now)
+        replies.append({"claim_id": cid, "replacement": text})
+    return replies
 
 
 def decision_reply() -> dict:
@@ -370,7 +641,7 @@ class Simulator:
         if path == "/api/session/is-auth-enabled":
             return httpx.Response(200, json={"inference_auth_enforced": False})
         if path == "/api/governance/virtual-keys/quota":
-            return httpx.Response(200, json={"virtual_key_name": "shelflife-demo", "is_active": True,
+            return httpx.Response(200, json={"virtual_key_name": "shelflife-workspace", "is_active": True,
                                              "budgets": [{"max_limit": 5.0, "current_usage": round(self.spend, 4), "reset_duration": "1M"}]})
         if path.startswith("/api/plugins"):
             return httpx.Response(200, json={"plugins": [{"name": "semantic_cache", "enabled": True}]})
@@ -381,9 +652,9 @@ class Simulator:
         context = (re.search(r"<context>\n(.*?)\n</context>", full, re.S) or [None, ""])[1] or ""
 
         if "<passage" in full:
-            passages = re.findall(r'<passage id="(c\d+)">\noriginal: (.*?)\nclaim: .*?\ncurrent value: (.*?)\n</passage>', full, re.S)
-            reply: Any = {"replacements": [{"claim_id": cid, "replacement": rewrite_passage(original, current)}
-                                           for cid, original, current in passages]}
+            reply: Any = {"replacements": rewrite_reply(full)}
+        elif "<item id=" in full:
+            reply = retarget_reply(full)
         elif "<recommendation>" in full:
             reply = decision_reply()
         elif (match := re.search(r"<claim>\n(.*?)\n</claim>", full, re.S)):

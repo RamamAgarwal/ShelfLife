@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from app.models import CheckResult
 from app.pipeline.adjudicate import verified_quote
 
 TIMEOUT = httpx.Timeout(8.0, connect=4.0)
@@ -69,7 +70,7 @@ async def check_url(url: str, quote: str | None = None) -> dict[str, Any]:
                 return {**report, "status": "error", "detail": "Not a web address."}
             if _demo_suffix and not parts.hostname.endswith(_demo_suffix):
                 return {**report, "status": "error",
-                        "detail": f"Demo mode only visits the invented {_demo_suffix} sites."}
+                        "detail": f"Only {_demo_suffix} sites are visited in this workspace."}
             if not await _is_public(parts.hostname):
                 return {**report, "status": "error", "detail": "Only public web addresses are checked."}
             try:
@@ -94,6 +95,19 @@ async def check_url(url: str, quote: str | None = None) -> dict[str, Any]:
     if redirected:
         return {**report, "status": "moved", "detail": "The address now redirects elsewhere."}
     return {**report, "status": "ok", "detail": "The page is reachable" + (" and still has the quote." if quote else ".")}
+
+
+def items_for_check(result: CheckResult) -> list[dict[str, Any]]:
+    """The links a check relied on: those in the answer, then each source with its quote."""
+    items: list[dict[str, Any]] = [{"url": url, "source": "answer"} for url in urls_in_text(result.answer)]
+    seen = {item["url"] for item in items}
+    for claim in result.claims:
+        for evidence in claim.evidence:
+            if evidence.stance != "irrelevant" and evidence.url not in seen:
+                seen.add(evidence.url)
+                items.append({"url": evidence.url, "quote": evidence.quote, "claim_id": claim.claim.id,
+                              "claim_text": claim.claim.text, "source": "evidence"})
+    return items
 
 
 async def check_links(items: list[dict[str, Any]], concurrency: int = 5) -> list[dict[str, Any]]:

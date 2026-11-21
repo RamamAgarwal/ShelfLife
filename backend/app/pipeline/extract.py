@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import re
 from collections.abc import Iterator
 from datetime import date
@@ -10,7 +11,7 @@ from difflib import SequenceMatcher
 from pydantic import BaseModel, Field
 
 from app import config, search
-from app.models import DERIVED_KINDS, Category, Claim, ClaimKind
+from app.models import DERIVED_KINDS, Category, Claim, ClaimKind, TimeFrame
 from app.passport import passport_id
 from app.pipeline.metrics import MetricsCollector
 from app.prompts import load_prompt, neutralise_tag
@@ -35,6 +36,9 @@ class ExtractedClaim(BaseModel):
     depends_on: list[str] = []
     formula: str | None = None
     number: float | None = None
+    time_frame: TimeFrame = "current"
+    as_of: str | None = None
+    as_of_date: str | None = None
 
 
 class ExtractionOutput(BaseModel):
@@ -56,17 +60,22 @@ async def extract_claims(
         settings.fallbacks_fast_list,
         json_schema=ExtractionOutput,
     )
-    return build_claims(answer, result.parsed.claims)
+    return build_claims(answer, result.parsed.claims, check_date)
 
 
 def build_messages(
     answer: str, question: str | None, answer_date: date | None, check_date: date
 ) -> list[dict]:
-    parts = [f"Today's date: {check_date.isoformat()}"]
+    parts = [
+        f"Today's date: {check_date.isoformat()}. Resolve relative dates such as "
+        "'last year' against it unless the answer says when it was written."
+    ]
     if answer_date:
         parts.append(
             f"The answer was written on {answer_date.isoformat()}. "
-            "Resolve words like 'now' or 'this year' against that date."
+            "Resolve relative dates such as 'last year' or 'in March' against that date. "
+            "Claims it presents as the current state are still `current`: the check is "
+            "whether they are true today."
         )
     if question:
         parts.append(f"<question>\n{neutralise_tag(question, 'question')}\n</question>")
@@ -77,7 +86,40 @@ def build_messages(
     ]
 
 
-def build_claims(answer: str, extracted: list[ExtractedClaim]) -> list[Claim]:
+def period_end(value: str | None) -> date | None:
+    """The last day of "2019", "2019-10" or "2019-10-14". Anything else gives None."""
+    if not value:
+        return None
+    match = re.fullmatch(r"(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?", value.strip())
+    if not match:
+        return None
+    year, month, day = (int(part) if part else None for part in match.groups())
+    try:
+        if month is None:
+            return date(year, 12, 31)
+        if day is None:
+            return date(year, month, calendar.monthrange(year, month)[1])
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _time_frame(item: ExtractedClaim, check_date: date | None) -> tuple[TimeFrame, str | None, date | None]:
+    """Keep the model's time frame only when its date is consistent with it."""
+    frame = item.time_frame
+    as_of = (item.as_of or "").strip()[:80] or None
+    as_of_date = period_end(item.as_of_date)
+    if frame == "past" and as_of_date and check_date and as_of_date > check_date:
+        # "In 2027 the price was..." can't be history yet; judge it as a current claim.
+        frame, as_of_date = "current", None
+    if frame == "current":
+        return "current", None, None
+    return frame, as_of, as_of_date
+
+
+def build_claims(
+    answer: str, extracted: list[ExtractedClaim], check_date: date | None = None
+) -> list[Claim]:
     """Locate, clean and number claims, in the order they appear in the answer."""
     located: list[tuple[ExtractedClaim, tuple[int, int] | None]] = []
     seen: set[str] = set()
@@ -103,6 +145,7 @@ def build_claims(answer: str, extracted: list[ExtractedClaim]) -> list[Claim]:
         text = item.text.strip()
         queries = [query.strip() for query in item.search_queries if query.strip()]
         derived = item.kind in DERIVED_KINDS
+        frame, as_of, as_of_date = _time_frame(item, check_date)
         claims.append(
             Claim(
                 id=claim_id,
@@ -118,6 +161,9 @@ def build_claims(answer: str, extracted: list[ExtractedClaim]) -> list[Claim]:
                 formula=_map_formula(item.formula, ids) if item.kind == "calculation" else None,
                 number=item.number,
                 passport_id=passport_id(text),
+                time_frame=frame,
+                as_of=as_of,
+                as_of_date=as_of_date,
             )
         )
     return claims

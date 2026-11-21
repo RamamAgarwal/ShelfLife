@@ -78,12 +78,7 @@ export function DashboardPage() {
       {loading && !data && <Loading />}
       {data && (
         <>
-          {data.demo_mode && (
-            <p className="rounded-lg border px-3 py-2 text-sm text-muted-foreground">
-              Demo mode: these numbers come from the built-in simulator with invented data.
-            </p>
-          )}
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-5 rounded-xl border p-4 sm:grid-cols-4 sm:p-5">
+          <dl className="grid grid-cols-2 gap-x-8 gap-y-7 rounded-2xl border bg-card p-6 shadow-[0_1px_2px_oklch(0_0_0/0.04)] sm:grid-cols-4">
             <Stat label="Checks" value={data.totals.checks} />
             <Stat label="Claims checked" value={data.totals.claims_checked} />
             <Stat label="Found stale" value={percent(data.totals.stale_rate)} hint={`${data.totals.verdicts.stale ?? 0} claims`} />

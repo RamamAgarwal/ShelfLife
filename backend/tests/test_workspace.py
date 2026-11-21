@@ -246,7 +246,7 @@ async def test_demo_mode_runs_with_no_keys(monkeypatch, settings):
 
     assert settings.missing_required() == []
     assert settings.history_path.name == "history-demo.sqlite3"
-    assert [s["id"] for s in demo.scenarios()] == ["cloud", "facts", "compare"]
+    assert [s["id"] for s in demo.scenarios()] == ["cloud", "facts", "release", "history", "compare"]
 
 
 # --- alerts ----------------------------------------------------------------------

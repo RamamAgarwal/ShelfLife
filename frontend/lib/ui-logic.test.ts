@@ -343,12 +343,34 @@ describe("buildDiff", () => {
   it("lays out unchanged text and edits in answer order", () => {
     const { parts, notes } = buildDiff(answer, edits);
     expect(parts).toEqual([
-      { type: "replace", removed: "Acme costs $10", added: "Acme costs $25", citation: 1, claimId: "c1" },
+      { type: "replace", removed: "Acme costs $10", added: "Acme costs $25", citations: [1], claimIds: ["c1"] },
       { type: "same", text: ". " },
-      { type: "flag", text: "Bo runs Acme", flag: "(could not verify)", citation: null, claimId: "c2" },
+      { type: "flag", text: "Bo runs Acme", flag: "(could not verify)", citations: [], claimIds: ["c2"] },
       { type: "same", text: ". It has 40 staff." },
     ]);
     expect(notes.map((note) => note.claim_id)).toEqual(["c3"]);
+  });
+
+  it("keeps every citation and claim of a merged edit", () => {
+    const merged = {
+      claim_id: "c1",
+      kind: "replace" as const,
+      start: 0,
+      end: 14,
+      before: "Acme costs $10",
+      after: "Acme costs $25 [1][2]",
+      citation: 1,
+      claim_ids: ["c1", "c4"],
+      citations: [1, 2],
+    };
+    const { parts } = buildDiff(answer, [merged]);
+    expect(parts[0]).toEqual({
+      type: "replace",
+      removed: "Acme costs $10",
+      added: "Acme costs $25",
+      citations: [1, 2],
+      claimIds: ["c1", "c4"],
+    });
   });
 
   it("rebuilds the original text from its unchanged and removed parts", () => {

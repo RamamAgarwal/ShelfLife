@@ -3,12 +3,17 @@
 The model only writes a short replacement for each stale passage. Code splices the
 replacements into the original text by character offset, so everything else stays
 word for word, and adds the citation markers and "(could not verify)" flags itself.
+
+Claims whose passages overlap are corrected together. "Version 3.13, launched on
+October 7, 2024" holds two claims (the version and its release date); when the
+version is out of date, its date usually is too, and both must change in one
+consistent edit rather than one of them being dropped into a footnote.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from pydantic import BaseModel
@@ -39,6 +44,32 @@ class _Change:
     result: ClaimResult
     kind: str  # "stale" or "flag"
 
+    @property
+    def has_value(self) -> bool:
+        return self.kind == "stale" and bool(self.result.current_value)
+
+    @property
+    def drops(self) -> bool:
+        """A detail of a stale value that couldn't be confirmed for the new value."""
+        return self.kind == "flag" and self.result.coupled_to is not None
+
+
+@dataclass
+class _Group:
+    """Changes whose passages overlap, so they are edited as one passage."""
+
+    changes: list[_Change] = field(default_factory=list)
+    start: int = 0
+    end: int = 0
+
+    @property
+    def key(self) -> str:
+        return self.changes[0].result.claim.id
+
+    @property
+    def needs_model(self) -> bool:
+        return any(change.has_value for change in self.changes)
+
 
 def _valid_span(answer: str, result: ClaimResult) -> bool:
     span = result.claim.span
@@ -49,22 +80,23 @@ def _numbers(text: str) -> set[str]:
     return {match.replace(",", "") for match in _NUMBER.findall(text)}
 
 
-def validate_replacement(before: str, replacement: str, current_value: str) -> bool:
-    """Accept only a drop-in replacement that states the current value and nothing new."""
+def validate_replacement(before: str, replacement: str, current_value: str | list[str]) -> bool:
+    """Accept only a drop-in replacement that states the current values and nothing new."""
+    values = [current_value] if isinstance(current_value, str) else current_value
     text = replacement.strip()
     if not text or "\n" in text or text == before.strip():
         return False
     if _CITATION_MARKER.search(text):
         return False
-    if len(text) > max(3 * len(before), len(before) + len(current_value) + 40):
+    if len(text) > max(3 * len(before), len(before) + sum(len(v) for v in values) + 40):
         return False
     new_numbers = _numbers(text)
-    value_numbers = _numbers(current_value)
-    # No numbers may appear that neither the original nor the current value contains.
-    if not new_numbers <= _numbers(before) | value_numbers:
+    value_numbers = [_numbers(value) for value in values]
+    # No numbers may appear that neither the original nor a current value contains.
+    if not new_numbers <= _numbers(before).union(*value_numbers):
         return False
-    # If the current value has numbers, the replacement has to use at least one.
-    return not value_numbers or bool(new_numbers & value_numbers)
+    # Each current value with numbers has to be stated with at least one of them.
+    return all(not numbers or numbers & new_numbers for numbers in value_numbers)
 
 
 def best_source(result: ClaimResult) -> Evidence | None:
@@ -73,8 +105,8 @@ def best_source(result: ClaimResult) -> Evidence | None:
     return max(contradicting, key=lambda item: item.weight, default=None)
 
 
-def _changes(answer: str, results: list[ClaimResult]) -> tuple[list[_Change], list[_Change]]:
-    """Split the changes into ones placed in the text and ones that become end notes."""
+def _changes(answer: str, results: list[ClaimResult]) -> tuple[list[_Group], list[_Change]]:
+    """Group the changes placed in the text, and list those that become end notes."""
     changes = []
     for result in results:
         if result.verdict == "stale":
@@ -87,29 +119,43 @@ def _changes(answer: str, results: list[ClaimResult]) -> tuple[list[_Change], li
         key=lambda change: change.result.claim.span,
     )
     notes = [change for change in changes if not _valid_span(answer, change.result)]
-    kept: list[_Change] = []
-    last_end = -1
+    groups: list[_Group] = []
     for change in placed:
         start, end = change.result.claim.span
-        if start < last_end:
-            # Overlapping passages can't both be edited in place.
-            notes.append(change)
+        if groups and start < groups[-1].end:
+            groups[-1].changes.append(change)
+            groups[-1].end = max(groups[-1].end, end)
         else:
-            kept.append(change)
-            last_end = end
-    # Notes follow the answer's order; claims with no place in the text go last.
-    notes.sort(
-        key=lambda change: (0, change.result.claim.span[0])
-        if _valid_span(answer, change.result)
-        else (1, 0)
-    )
-    return kept, notes
+            groups.append(_Group([change], start, end))
+    return groups, notes
+
+
+def _fallback(before: str, group: _Group) -> str:
+    """Without a model replacement: swap each old value for its new one where the
+    passage states it word for word, and say "now ..." for the rest."""
+    text = before
+    pending: list[str] = []
+    for change in group.changes:
+        result = change.result
+        if change.has_value:
+            old = result.change.old_value if result.change else None
+            if old and old in text and len(group.changes) > 1:
+                text = text.replace(old, result.current_value, 1)
+            else:
+                pending.append(f"now {result.current_value}")
+        elif change.kind == "stale":
+            pending.append("out of date")
+        else:
+            pending.append("could not verify")
+    if len(group.changes) == 1 and pending:
+        return f"{text} ({pending[0]})"
+    return f"{text} ({'; '.join(pending)})" if pending else text
 
 
 def build_rewrite(
     answer: str, results: list[ClaimResult], replacements: dict[str, str]
 ) -> Rewrite:
-    placed, notes = _changes(answer, results)
+    groups, notes = _changes(answer, results)
     citations: dict[str, Citation] = {}
 
     def cite(result: ClaimResult) -> int | None:
@@ -127,33 +173,38 @@ def build_rewrite(
         return citations[source.url].number
 
     edits: list[AnswerEdit] = []
-    for change in placed:
-        result = change.result
-        start, end = result.claim.span
-        before = answer[start:end]
-        citation = None
-        if change.kind == "flag":
-            kind, after = "flag", before + COULD_NOT_VERIFY
-        elif result.current_value:
-            citation = cite(result)
-            replacement = replacements.get(result.claim.id)
-            if replacement is None:
-                replacement = f"{before} (now {result.current_value})"
-            # Don't double the sentence's full stop when the passage ends just before it.
-            if replacement.endswith(".") and answer[end : end + 1] == ".":
-                replacement = replacement[:-1]
-            kind, after = "replace", replacement
+    for group in groups:
+        before = answer[group.start : group.end]
+        stale = [change for change in group.changes if change.kind == "stale"]
+        numbers = list(dict.fromkeys(n for c in stale if (n := cite(c.result)) is not None))
+        if not any(change.has_value for change in group.changes):
+            kind, after = "flag", before + (OUT_OF_DATE if stale else COULD_NOT_VERIFY)
         else:
-            citation = cite(result)
-            kind, after = "flag", before + OUT_OF_DATE
-        if citation is not None:
-            after += f" [{citation}]"
+            kind = "replace"
+            after = replacements.get(group.key) or _fallback(before, group)
+            # Don't double the sentence's full stop when the passage ends just before it.
+            if after.endswith(".") and answer[group.end : group.end + 1] == ".":
+                after = after[:-1]
+            # A detail the model kept unchanged still gets its flag.
+            if group.key in replacements and any(
+                change.kind == "flag" and not change.drops for change in group.changes
+            ):
+                after += COULD_NOT_VERIFY
+        if numbers:
+            after += " " + "".join(f"[{number}]" for number in numbers)
         edits.append(AnswerEdit(
-            claim_id=result.claim.id, kind=kind, start=start, end=end,
-            before=before, after=after, citation=citation,
+            claim_id=group.key, kind=kind, start=group.start, end=group.end,
+            before=before, after=after, citation=numbers[0] if numbers else None,
+            claim_ids=[change.result.claim.id for change in group.changes], citations=numbers,
         ))
 
-    for change in notes:
+    note_changes = sorted(
+        notes,
+        key=lambda change: (0, change.result.claim.span[0])
+        if _valid_span(answer, change.result)
+        else (1, 0),
+    )
+    for change in note_changes:
         result = change.result
         citation = None
         if change.kind == "flag":
@@ -169,6 +220,7 @@ def build_rewrite(
         edits.append(AnswerEdit(
             claim_id=result.claim.id, kind="note", start=None, end=None,
             before="", after=text, citation=citation,
+            claim_ids=[result.claim.id], citations=[citation] if citation else [],
         ))
 
     pieces = []
@@ -189,35 +241,62 @@ def build_rewrite(
     )
 
 
-def build_messages(answer: str, targets: list[ClaimResult], check_date: date) -> list[dict]:
+def _fact_line(change: _Change) -> str:
+    result = change.result
+    claim = result.checked_as or result.claim.text
+    if change.has_value:
+        stated = result.change.old_value if result.change and result.change.old_value else None
+        line = f"fact: {claim}"
+        if stated:
+            line += f" | stated: {stated}"
+        if result.claim.historical:
+            # Correct the value for that time and keep the answer's time framing.
+            when = result.claim.as_of or "that time"
+            return f"{line} | value at that time ({when}): {result.current_value}"
+        return f"{line} | now: {result.current_value}"
+    if change.drops:
+        return f"fact: {claim} | now: unknown for the current value, so remove this detail"
+    return f"fact: {claim} | now: keep unchanged"
+
+
+def build_messages(answer: str, groups: list[_Group], check_date: date) -> list[dict]:
     parts = [
         f"Today's date: {check_date.isoformat()}",
         f"<answer>\n{neutralise_tag(answer, 'answer')}\n</answer>",
     ]
-    for result in targets:
-        start, end = result.claim.span
-        fields = "\n".join([
-            f"original: {answer[start:end]}",
-            f"claim: {result.claim.text}",
-            f"current value: {result.current_value}",
-        ])
-        body = neutralise_tag(neutralise_tag(fields, "passage"), "answer")
-        parts.append(f'<passage id="{result.claim.id}">\n{body}\n</passage>')
+    for group in groups:
+        lines = [f"original: {answer[group.start : group.end]}"]
+        lines += [_fact_line(change) for change in group.changes]
+        body = neutralise_tag(neutralise_tag("\n".join(lines), "passage"), "answer")
+        parts.append(f'<passage id="{group.key}">\n{body}\n</passage>')
     return [
         {"role": "system", "content": load_prompt("rewrite")},
         {"role": "user", "content": "\n\n".join(parts)},
     ]
 
 
+def _accept(answer: str, group: _Group, replacement: str) -> bool:
+    before = answer[group.start : group.end]
+    values = [change.result.current_value for change in group.changes if change.has_value]
+    if not validate_replacement(before, replacement, values):
+        return False
+    # A dropped detail's old numbers must actually be gone.
+    for change in group.changes:
+        if change.drops:
+            own = _numbers(answer[slice(*change.result.claim.span)]) - _numbers(
+                " ".join(values)
+            )
+            if own & _numbers(replacement):
+                return False
+    return True
+
+
 async def rewrite_answer(
     answer: str, results: list[ClaimResult], check_date: date, metrics: MetricsCollector
 ) -> Rewrite:
     """Write the corrected answer. Model problems fall back to plain "(now X)" edits."""
-    targets = [
-        result
-        for result in results
-        if result.verdict == "stale" and result.current_value and _valid_span(answer, result)
-    ]
+    groups, _ = _changes(answer, results)
+    targets = [group for group in groups if group.needs_model]
     replacements: dict[str, str] = {}
     if targets:
         settings = config.get_settings()
@@ -232,12 +311,11 @@ async def rewrite_answer(
         except llm.LLMError:
             response = None
         if response is not None:
-            by_id = {result.claim.id: result for result in targets}
+            by_key = {group.key: group for group in targets}
             for item in response.parsed.replacements:
-                result = by_id.get(item.claim_id)
-                if result is None or item.claim_id in replacements:
+                group = by_key.get(item.claim_id)
+                if group is None or item.claim_id in replacements:
                     continue
-                start, end = result.claim.span
-                if validate_replacement(answer[start:end], item.replacement, result.current_value):
+                if _accept(answer, group, item.replacement):
                     replacements[item.claim_id] = item.replacement.strip()
     return build_rewrite(answer, results, replacements)

@@ -33,7 +33,8 @@ async def retrieve_sources(
     context: CheckContext | None = None,
 ) -> RetrievedSources:
     """Run the claim's queries in parallel and merge the results."""
-    topic = "news" if claim.category in NEWS_CATEGORIES else "general"
+    # History is better served by general pages than by recent news.
+    topic = "news" if claim.category in NEWS_CATEGORIES and not claim.historical else "general"
     domains = None
     if claim.category in OFFICIAL_DOMAIN_CATEGORIES and claim.official_domains:
         domains = claim.official_domains

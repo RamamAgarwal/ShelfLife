@@ -6,16 +6,26 @@ export type DiffPart =
       type: "replace";
       removed: string;
       added: string;
-      citation: number | null;
-      claimId: string;
+      citations: number[];
+      claimIds: string[];
     }
-  | { type: "flag"; text: string; flag: string; citation: number | null; claimId: string };
+  | { type: "flag"; text: string; flag: string; citations: number[]; claimIds: string[] };
 
-const CITATION_SUFFIX = /\s\[(\d+)\]$/;
+const CITATION_SUFFIX = /\s(\[\d+\])+$/;
 
-/** Split "text [2]" into the text and the marker, so the marker can be a link. */
+/** Split "text [2]" or "text [1][2]" into the text and its markers, so markers can be links. */
 export function splitCitation(text: string): string {
   return text.replace(CITATION_SUFFIX, "");
+}
+
+/** Every source an edit cites. Checks saved before edits could merge only have `citation`. */
+export function editCitations(edit: AnswerEdit): number[] {
+  if (edit.citations && edit.citations.length > 0) return edit.citations;
+  return edit.citation === null ? [] : [edit.citation];
+}
+
+export function editClaimIds(edit: AnswerEdit): string[] {
+  return edit.claim_ids && edit.claim_ids.length > 0 ? edit.claim_ids : [edit.claim_id];
 }
 
 /** Lay the answer out as unchanged text and edits, in order. Notes are returned apart. */
@@ -40,16 +50,16 @@ export function buildDiff(
         type: "replace",
         removed: answer.slice(start, end),
         added: after,
-        citation: edit.citation,
-        claimId: edit.claim_id,
+        citations: editCitations(edit),
+        claimIds: editClaimIds(edit),
       });
     } else {
       parts.push({
         type: "flag",
         text: answer.slice(start, end),
         flag: after.slice(edit.before.length).trim(),
-        citation: edit.citation,
-        claimId: edit.claim_id,
+        citations: editCitations(edit),
+        claimIds: editClaimIds(edit),
       });
     }
     cursor = end;

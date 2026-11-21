@@ -137,7 +137,10 @@ export function CheckForm({
   const nearLimit = answer.length > MAX_ANSWER_CHARS * 0.9;
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-7 rounded-2xl border bg-card p-5 shadow-[0_1px_2px_oklch(0_0_0/0.04)] sm:p-7"
+    >
       <div className="flex flex-col gap-2">
         <Label htmlFor="question">
           Question <span className="font-normal text-muted-foreground">(optional)</span>
@@ -166,7 +169,7 @@ export function CheckForm({
             Generate with old model
           </Button>
         </div>
-        {examples ?? <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm">
+        {examples ?? <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="mr-1 text-muted-foreground">Try an example:</span>
           {EXAMPLES.map((example) => (
             <Button
@@ -175,7 +178,7 @@ export function CheckForm({
               variant="ghost"
               size="sm"
               disabled={generating}
-              className="text-muted-foreground underline decoration-border underline-offset-4"
+              className="rounded-full border bg-surface px-3 text-foreground/85 hover:border-brand/50 hover:bg-brand-soft hover:text-foreground"
               onClick={() => runExample(example.question)}
             >
               {example.label}
@@ -195,6 +198,7 @@ export function CheckForm({
         </div>
         <Textarea
           id="answer"
+          data-tour="answer-input"
           value={answer}
           maxLength={MAX_ANSWER_CHARS}
           placeholder="Paste an answer from any AI model."
@@ -244,6 +248,7 @@ export function CheckForm({
         <Button
           type="submit"
           size="lg"
+          data-tour="check-button"
           className="h-10 px-5"
           disabled={!answer.trim() || submitting || generating}
         >

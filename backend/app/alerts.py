@@ -35,8 +35,25 @@ def stale_alert(result: CheckResult) -> dict | None:
 
 async def send_stale_alert(result: CheckResult) -> bool:
     """POST the alert if a webhook is set and something is stale. Never raises."""
+    return await _post(stale_alert(result))
+
+
+async def send_impact_alert(report: dict) -> bool:
+    """Tell the webhook what a newly stale claim affects downstream. Never raises."""
+    if not report["counts"]["total"]:
+        return False
+    return await _post({
+        "event": "stale_claim_impact",
+        "claim": report["claim"],
+        "severity": report["severity"],
+        "counts": report["counts"],
+        "documents": [{"id": d["id"], "title": d["title"], "kind": d["kind"]} for d in report["documents"]],
+        "answers": [a["check_id"] for a in report["answers"]],
+    })
+
+
+async def _post(payload: dict | None) -> bool:
     url = config.get_settings().alert_webhook_url
-    payload = stale_alert(result)
     if not url or payload is None:
         return False
     try:

@@ -42,7 +42,7 @@ function Results({ summary, meta }: Required<Pick<EvaluationData, "summary" | "m
           .join(", ")}
         ).
       </p>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-5 rounded-xl border p-4 sm:grid-cols-4 sm:p-5">
+      <dl className="grid grid-cols-2 gap-x-8 gap-y-7 rounded-2xl border bg-card p-6 shadow-[0_1px_2px_oklch(0_0_0/0.04)] sm:grid-cols-4">
         <Stat label="Claims found" value={percent(summary.extraction_recall)} hint="of labelled claims extracted" />
         <Stat label="Stale precision" value={percent(summary.stale_strict.precision)} hint="flagged stale and really stale" />
         <Stat label="Stale recall" value={percent(summary.stale_strict.recall)} hint="really stale and flagged stale" />
@@ -126,7 +126,7 @@ export function EvaluationPage() {
           description={
             data.available
               ? "Labels go stale too, so re-label and re-run before quoting these numbers."
-              : "The results appear here after a labelled run. It needs real keys, so it can't run in demo mode. Run these from the backend folder:"
+              : "The results appear here after a labelled run against live Bifrost and Tavily. Run these from the backend folder:"
           }
         >
           <ol className="flex flex-col gap-3">

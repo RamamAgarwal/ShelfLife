@@ -1,5 +1,5 @@
 import type { ClaimView } from "@/lib/check-state";
-import type { Category, ClaimKind, Verdict } from "@/lib/types";
+import type { Category, ClaimKind, TimeFrame, Verdict } from "@/lib/types";
 
 export type Tone = "fresh" | "uncertain" | "stale" | "unknown" | "pending";
 
@@ -11,6 +11,24 @@ export const VERDICT_INFO: Record<Verdict, { label: string; tone: Tone }> = {
   error: { label: "Couldn't check", tone: "unknown" },
   not_time_sensitive: { label: "Doesn't change", tone: "unknown" },
 };
+
+/** A past claim is right or wrong for its time; "fresh" and "stale" describe today. */
+const HISTORICAL_LABELS: Partial<Record<Verdict, string>> = {
+  fresh: "Correct for its time",
+  uncertain: "Unclear for its time",
+  stale: "Wrong for its time",
+};
+
+export function verdictLabel(verdict: Verdict, timeFrame?: TimeFrame | null): string {
+  return (timeFrame === "past" && HISTORICAL_LABELS[verdict]) || VERDICT_INFO[verdict].label;
+}
+
+/** "As of June 2025" for a past claim, "Planned for 2026" for a future one, else null. */
+export function timeFrameLabel(claim: { time_frame?: TimeFrame; as_of?: string | null }): string | null {
+  if (claim.time_frame === "past") return claim.as_of ? `As of ${claim.as_of}` : "About the past";
+  if (claim.time_frame === "future") return claim.as_of ? `Planned: ${claim.as_of}` : "Planned or expected";
+  return null;
+}
 
 export const CATEGORY_LABELS: Record<Category, string> = {
   pricing: "Pricing",

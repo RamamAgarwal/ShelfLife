@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BookmarkPlus, CircleAlert, CircleCheck, Copy, LoaderCircle, RefreshCw } from "lucide-react";
 
 import { PageContainer } from "@/components/app-shell";
+import { IntegrationsPanel } from "@/components/integrations-panel";
 import { Button } from "@/components/ui/button";
 import { ErrorNote, Loading, PageHeader, Panel } from "@/components/ui-kit";
 import { useApi } from "@/hooks/use-api";
@@ -142,15 +143,6 @@ export function SystemPage() {
       {loading && !data && <Loading />}
       {data && (
         <>
-          {data.demo_mode && (
-            <Panel title="Demo mode is on">
-              <p className="text-sm leading-6 text-muted-foreground">
-                DEMO_MODE=true in .env. Every model call, search and web page comes from a built-in simulator with
-                invented companies and figures, so all features work without keys or credits. Nothing on any page reflects
-                the real world. Set DEMO_MODE=false and restart the backend to use Bifrost and Tavily.
-              </p>
-            </Panel>
-          )}
           {data.missing_settings.length > 0 && (
             <ErrorNote message={`Missing settings in .env: ${data.missing_settings.join(", ")}.`} />
           )}
@@ -228,6 +220,7 @@ export function SystemPage() {
             <Status ok={Boolean(data.cache_plugin.enabled)}>{data.cache_plugin.detail}</Status>
             <ErrorNote message={cacheError} />
           </Panel>
+          <IntegrationsPanel />
           <Bookmarklet />
           <Panel title="API" description={`Other apps can call ShelfLife directly at ${API_URL}. Full schema at ${API_URL}/docs.`}>
             <pre className="overflow-x-auto rounded-lg bg-muted px-3 py-2.5 font-mono text-xs leading-5">{CURL}</pre>

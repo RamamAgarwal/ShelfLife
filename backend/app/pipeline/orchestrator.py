@@ -9,8 +9,9 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timezone
 from typing import Any
 
-from app import config, llm
+from app import config, llm, policies
 from app.authority import authority_for
+from app.policies import FreshnessPolicy
 from app.models import (
     ChangeInfo,
     CheckContext,
@@ -22,7 +23,8 @@ from app.models import (
     ScoreBreakdown,
     Verdict,
 )
-from app.pipeline.adjudicate import Adjudication, adjudicate_claim, evidence_id
+from app.pipeline.adjudicate import Adjudication, AnswerSetting, adjudicate_claim, evidence_id
+from app.pipeline.cascade import check_coupled_details
 from app.pipeline.extract import extract_claims
 from app.pipeline.independence import group_sources
 from app.pipeline.metrics import MetricsCollector
@@ -60,8 +62,11 @@ async def run_check(
     context: CheckContext | None = None,
     profile_id: str | None = None,
     profile_version: int | None = None,
+    policy: FreshnessPolicy | None = None,
+    trigger: str | None = None,
 ) -> CheckResult:
     settings = config.get_settings()
+    policy = policy or policies.resolve(None)
     missing = settings.missing_required()
     if missing:
         raise PipelineError(f"Missing settings in .env: {', '.join(missing)}.", "not_configured")
@@ -112,23 +117,31 @@ async def run_check(
     search_slots = asyncio.Semaphore(settings.tavily_concurrency)
     llm_slots = asyncio.Semaphore(settings.llm_concurrency)
 
-    async def check(claim: Claim) -> None:
-        await finish_claim(
-            await _check_claim(
-                claim, check_date, answer_date, deep, search_slots, llm_slots, metrics, emit,
-                context,
-            )
+    async def check_one(claim: Claim) -> ClaimResult:
+        return await _check_claim(
+            claim, check_date, answer_date, deep, search_slots, llm_slots, metrics, emit,
+            context, policy, AnswerSetting(question, answer),
         )
+
+    async def check(claim: Claim) -> None:
+        await finish_claim(await check_one(claim))
         await emit_metrics()
 
     await asyncio.gather(*(check(claim) for claim in plan.to_check))
+    # Details written about a value that turned out stale (its release date, say) are
+    # re-checked for the current value, so the corrected answer stays consistent.
+    coupled = await check_coupled_details(claims, results, answer, metrics, check_one)
+    for result in coupled:
+        await finish_claim(result)
+    if coupled:
+        await emit_metrics()
     # Calculations and recommendations, worked out from the checked facts.
     await resolve_derived(claims, answer, results, metrics, on_result=finish_claim)
     if plan.derived:
         await emit_metrics()
 
     ordered = [results[claim.id] for claim in claims]
-    action, reason = guard(ordered)
+    action, reason = guard(ordered, policy)
     rewrite = await rewrite_answer(answer, ordered, check_date, metrics)
     await emit("rewrite_ready", rewrite.model_dump(mode="json"))
     await emit_metrics()
@@ -139,9 +152,12 @@ async def run_check(
         check_date=check_date,
         claims=ordered,
         answer_score=answer_score(
-            (item.claim.category, item.freshness_score)
-            for item in ordered
-            if item.freshness_score is not None
+            (
+                (item.claim.category, item.freshness_score)
+                for item in ordered
+                if item.freshness_score is not None
+            ),
+            policy.half_lives(),
         ),
         verdict_counts=dict(Counter(item.verdict for item in ordered)),
         corrected_answer=rewrite.corrected_answer,
@@ -154,6 +170,8 @@ async def run_check(
         context=context if context and not context.is_empty() else None,
         profile_id=profile_id,
         profile_version=profile_version,
+        policy_id=policy.id,
+        trigger=trigger,
     )
     await emit("done", check_result.model_dump(mode="json"))
     return check_result
@@ -169,6 +187,8 @@ async def _check_claim(
     metrics: MetricsCollector,
     emit: EventHandler,
     context: CheckContext | None = None,
+    policy: FreshnessPolicy | None = None,
+    setting: AnswerSetting | None = None,
 ) -> ClaimResult:
     """Check one claim. A failure here marks this claim and never stops the others."""
     retrieved = await retrieve_sources(claim, search_slots, metrics, deep, context)
@@ -186,7 +206,7 @@ async def _check_claim(
     try:
         async with llm_slots:
             adjudication = await adjudicate_claim(
-                claim, sources, check_date, answer_date, metrics, context
+                claim, sources, check_date, answer_date, metrics, context, setting
             )
     except llm.BudgetExceededError:
         return _unscored(claim, "error", f"{BUDGET_MESSAGE} This claim wasn't checked.")
@@ -195,13 +215,19 @@ async def _check_claim(
     except llm.LLMError as exc:
         return _unscored(claim, "error", f"The model call failed: {exc}")
 
-    return assemble_result(claim, sources, adjudication, check_date)
+    return assemble_result(claim, sources, adjudication, check_date, policy)
 
 
 def assemble_result(
-    claim: Claim, sources: list[SearchResult], adjudication: Adjudication, check_date: date
+    claim: Claim,
+    sources: list[SearchResult],
+    adjudication: Adjudication,
+    check_date: date,
+    policy: FreshnessPolicy | None = None,
 ) -> ClaimResult:
     """Combine sources and stances, and score them in code."""
+    half_life = policy.half_life(claim.category) if policy else None
+    reference = scoring_date(claim, check_date)
     identifiers = [evidence_id(index) for index in range(len(sources))]
     authorities = [authority_for(source.domain, claim.entities) for source in sources]
     judgements = [adjudication.judgements[identifier] for identifier in identifiers]
@@ -211,7 +237,7 @@ def assemble_result(
         SourceInput(authority, source.published_date, judgement.stance, group)
         for authority, source, judgement, group in zip(authorities, sources, judgements, groups)
     ]
-    score = score_claim(inputs, claim.category, check_date)
+    score = score_claim(inputs, claim.category, reference, half_life)
     evidence = [
         Evidence(
             id=identifier,
@@ -256,10 +282,44 @@ def assemble_result(
             independent_sources=score.independent_sources,
         ),
         llm=adjudication.call,
-        recheck_by=verdict_change_date(inputs, claim.category, check_date),
+        # History doesn't change, so a claim about a past time never needs re-checking.
+        recheck_by=None if claim.historical else _recheck_by(
+            inputs, claim.category, check_date, score.verdict, policy
+        ),
         change=_change(score.verdict, current_value, adjudication, evidence),
         context_note=adjudication.context_note,
     )
+
+
+def scoring_date(claim: Claim, check_date: date) -> date:
+    """The day a claim's sources are aged against.
+
+    A claim about now is judged by how recent its sources are. A claim about a past
+    time is judged by sources from then or later: a page written after that time can
+    report what was true then, so only sources from before it lose weight. With no
+    date for the past time, no dated source loses weight for its age.
+    """
+    if claim.historical:
+        return claim.as_of_date or date.min
+    return check_date
+
+
+def _recheck_by(
+    inputs: list[SourceInput],
+    category: str,
+    check_date: date,
+    verdict: str,
+    policy: FreshnessPolicy | None,
+) -> date | None:
+    """When to look again: when the evidence ages out, or the policy's interval if sooner."""
+    if verdict not in ("fresh", "uncertain"):
+        return None
+    half_life = policy.half_life(category) if policy else None
+    dates = [
+        verdict_change_date(inputs, category, check_date, half_life_days=half_life),
+        policy.recheck_date(category, check_date) if policy else None,
+    ]
+    return min((day for day in dates if day), default=None)
 
 
 CHANGE_TYPES = ("value_changed", "superseded", "deprecated", "discontinued", "renamed")

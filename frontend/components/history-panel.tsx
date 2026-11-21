@@ -22,7 +22,7 @@ export function HistoryPanel({
 
   return (
     <section aria-labelledby="history-heading" className="flex flex-col gap-3 px-3">
-      <h2 id="history-heading" className="flex items-center gap-1.5 text-sm font-medium">
+      <h2 id="history-heading" className="flex items-center gap-1.5 text-sm font-semibold">
         <History className="size-3.5" aria-hidden />
         Check history
       </h2>

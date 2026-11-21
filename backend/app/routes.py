@@ -164,14 +164,8 @@ async def check_links(request: LinkRequest) -> dict[str, Any]:
         result = history.store().get(request.check_id)
         if result is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No saved check with that id.")
-        items += [{"url": url, "source": "answer"} for url in links.urls_in_text(result.answer)]
-        seen = {item["url"] for item in items}
-        for claim in result.claims:
-            for evidence in claim.evidence:
-                if evidence.stance != "irrelevant" and evidence.url not in seen:
-                    seen.add(evidence.url)
-                    items.append({"url": evidence.url, "quote": evidence.quote, "claim_id": claim.claim.id,
-                                  "claim_text": claim.claim.text, "source": "evidence"})
+        known = {item["url"] for item in items}
+        items += [item for item in links.items_for_check(result) if item["url"] not in known]
     if not items:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Give some URLs or a check with evidence.")
     results = await links.check_links(items)

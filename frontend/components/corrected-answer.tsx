@@ -4,22 +4,25 @@ import { useMemo, useState } from "react";
 import { Check, Copy, ExternalLink } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { buildDiff, splitCitation } from "@/lib/diff";
+import { buildDiff, editCitations, editClaimIds, splitCitation } from "@/lib/diff";
 import { formatDate, safeHref } from "@/lib/format";
 import type { Rewrite } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function Marker({ number }: { number: number | null }) {
-  if (number === null) return null;
+function Markers({ numbers, prefix }: { numbers: number[]; prefix: string }) {
+  if (numbers.length === 0) return null;
   return (
     <sup className="ml-0.5">
-      <a
-        href={`#source-${number}`}
-        className="rounded-sm px-0.5 font-mono text-xs text-muted-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={`Source ${number}`}
-      >
-        [{number}]
-      </a>
+      {numbers.map((number) => (
+        <a
+          key={number}
+          href={`#${prefix}-${number}`}
+          className="rounded-sm px-0.5 font-mono text-xs text-muted-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`Source ${number}`}
+        >
+          [{number}]
+        </a>
+      ))}
     </sup>
   );
 }
@@ -28,10 +31,13 @@ export function CorrectedAnswer({
   answer,
   rewrite,
   running,
+  idPrefix = "source",
 }: {
   answer: string;
   rewrite: Rewrite | null;
   running: boolean;
+  /** Keeps source anchors unique when several corrected texts share a page. */
+  idPrefix?: string;
 }) {
   const [showChanges, setShowChanges] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -50,8 +56,11 @@ export function CorrectedAnswer({
     );
   }
 
-  const changes = rewrite.edits.filter((edit) => edit.kind === "replace").length;
-  const flags = rewrite.edits.length - changes;
+  // A merged edit corrects several claims at once, such as a version and its release date.
+  const changes = rewrite.edits
+    .filter((edit) => edit.kind === "replace")
+    .reduce((total, edit) => total + editClaimIds(edit).length, 0);
+  const flags = rewrite.edits.filter((edit) => edit.kind !== "replace").length;
 
   async function copy() {
     try {
@@ -99,7 +108,7 @@ export function CorrectedAnswer({
                 return (
                   <span key={index}>
                     {part.type === "replace" ? part.added : `${part.text} ${part.flag}`}
-                    <Marker number={part.citation} />
+                    <Markers numbers={part.citations} prefix={idPrefix} />
                   </span>
                 );
               }
@@ -114,7 +123,7 @@ export function CorrectedAnswer({
                       <span className="sr-only">Added: </span>
                       {part.added}
                     </ins>
-                    <Marker number={part.citation} />
+                    <Markers numbers={part.citations} prefix={idPrefix} />
                   </span>
                 );
               }
@@ -124,7 +133,7 @@ export function CorrectedAnswer({
                   <span className="rounded-[3px] bg-unknown-soft px-1 text-sm text-unknown italic">
                     {part.flag}
                   </span>
-                  <Marker number={part.citation} />
+                  <Markers numbers={part.citations} prefix={idPrefix} />
                 </span>
               );
             })}
@@ -135,15 +144,15 @@ export function CorrectedAnswer({
           {diff.notes.map((note) => (
             <li key={note.claim_id}>
               {splitCitation(note.after)}
-              <Marker number={note.citation} />
+              <Markers numbers={editCitations(note)} prefix={idPrefix} />
             </li>
           ))}
         </ul>
       )}
 
       {rewrite.citations.length > 0 && (
-        <section aria-labelledby="sources-heading" className="flex flex-col gap-2 border-t pt-4">
-          <h3 id="sources-heading" className="text-sm font-medium">
+        <section aria-labelledby={`${idPrefix}-heading`} className="flex flex-col gap-2 border-t pt-4">
+          <h3 id={`${idPrefix}-heading`} className="text-sm font-semibold">
             Sources
           </h3>
           <ol className="flex flex-col gap-1.5 text-sm">
@@ -152,7 +161,7 @@ export function CorrectedAnswer({
               return (
                 <li
                   key={citation.number}
-                  id={`source-${citation.number}`}
+                  id={`${idPrefix}-${citation.number}`}
                   className={cn("flex min-w-0 gap-2 scroll-mt-6 rounded-sm")}
                 >
                   <span className="font-mono text-xs leading-5 text-muted-foreground">

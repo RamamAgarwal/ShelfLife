@@ -23,7 +23,7 @@ import { HistoryPanel } from "@/components/history-panel";
 import { LinkReport } from "@/components/link-report";
 import { MetricsPanel } from "@/components/metrics-panel";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { ErrorNote, Tabs } from "@/components/ui-kit";
+import { ErrorNote, NativeSelect, Tabs } from "@/components/ui-kit";
 import { Watchlist } from "@/components/watchlist";
 import { useCheck } from "@/hooks/use-check";
 import {
@@ -44,6 +44,7 @@ import type {
   CheckResult,
   CheckTimeline,
   DemoScenario,
+  FreshnessPolicy,
   Profile,
   Verdict,
   WatchItem,
@@ -105,7 +106,7 @@ function Summary({ state }: { state: CheckState }) {
   const GuardIcon = result.guard?.action === "show" ? ShieldCheck : ShieldAlert;
 
   return (
-    <div className="flex flex-col gap-3" role="status">
+    <div className="flex flex-col gap-3" role="status" data-tour="summary-done">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         {result.answer_score !== null ? (
           <p className="flex items-baseline gap-1.5">
@@ -137,7 +138,7 @@ function Summary({ state }: { state: CheckState }) {
         {context.length > 0 && <p>Checked for: {context.join(" · ")}</p>}
       </div>
       {result.guard && (
-        <p className="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm">
+        <p className="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm" data-tour="guard">
           <GuardIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
           <span>
             <span className="font-medium">{GUARD_TEXT[result.guard.action]}.</span>{" "}
@@ -158,6 +159,8 @@ export function ShelfLifeApp() {
   const [context, setContext] = useState<CheckContext>({});
   const [profileId, setProfileId] = useState("");
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [policies, setPolicies] = useState<FreshnessPolicy[]>([]);
+  const [policyId, setPolicyId] = useState("");
   const [scenarios, setScenarios] = useState<DemoScenario[]>([]);
   const [budget, setBudget] = useState<BudgetStatus | null>(null);
   const [timeline, setTimeline] = useState<CheckTimeline | null>(null);
@@ -172,6 +175,14 @@ export function ShelfLifeApp() {
     let active = true;
     workspaceApi.profiles().then((value) => active && setProfiles(value.profiles)).catch(() => undefined);
     workspaceApi.demo().then((value) => active && setScenarios(value.scenarios)).catch(() => undefined);
+    workspaceApi
+      .policies()
+      .then((value) => {
+        if (!active) return;
+        setPolicies(value.policies);
+        setPolicyId(value.default);
+      })
+      .catch(() => undefined);
     const params = new URLSearchParams(window.location.search);
     Promise.resolve().then(() => {
       if (!active) return;
@@ -253,6 +264,7 @@ export function ShelfLifeApp() {
       use_cache: useCache,
       context: result.context,
       profile_id: result.profile_id,
+      policy_id: result.policy_id ?? (policyId || null),
     });
   }
 
@@ -277,6 +289,7 @@ export function ShelfLifeApp() {
       use_cache: useCache,
       context: profileId ? null : context,
       profile_id: profileId || null,
+      policy_id: policyId || null,
     });
   }
 
@@ -289,6 +302,7 @@ export function ShelfLifeApp() {
       use_cache: withCache,
       context: profileId ? null : context,
       profile_id: profileId || null,
+      policy_id: policyId || null,
     });
   }
 
@@ -304,14 +318,15 @@ export function ShelfLifeApp() {
   const checkScenarios = scenarios.filter((scenario) => scenario.answer);
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
+    <main className="mx-auto w-full max-w-7xl flex-1 px-5 py-8 sm:px-8 sm:py-12 lg:px-12">
       {!showResults ? (
-        <div className="mx-auto flex max-w-2xl flex-col gap-8">
-          <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
+        <div className="mx-auto flex max-w-3xl flex-col gap-10">
+          <div className="flex flex-col gap-4">
+            <p className="text-xs font-semibold tracking-[0.14em] text-brand uppercase">Freshness check</p>
+            <h1 className="text-[2.25rem] leading-[1.1] font-semibold tracking-tight text-balance sm:text-[3rem]">
               Is this AI answer still true?
             </h1>
-            <p className="leading-7 text-pretty text-muted-foreground">
+            <p className="max-w-[62ch] text-[1.05rem] leading-8 text-pretty text-muted-foreground">
               ShelfLife finds the claims that can go out of date, including hidden assumptions,
               figures and advice built on them. It re-checks them against live sources, scores each
               one from the evidence, and repairs the answer.
@@ -331,35 +346,58 @@ export function ShelfLifeApp() {
             onSubmit={submit}
             examples={
               checkScenarios.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm">
-                  <span className="mr-1 text-muted-foreground">Demo scenarios:</span>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="mr-1 text-muted-foreground">Examples:</span>
                   {checkScenarios.map((scenario) => (
                     <Button
                       key={scenario.id}
+                      data-tour={`example-${scenario.id}`}
                       type="button"
                       variant="ghost"
                       size="sm"
                       title={scenario.description}
-                      className="text-muted-foreground underline decoration-border underline-offset-4"
+                      className="rounded-full border bg-surface px-3 text-foreground/85 hover:border-brand/50 hover:bg-brand-soft hover:text-foreground"
                       onClick={() => applyScenario(scenario)}
                     >
                       {scenario.label}
                     </Button>
                   ))}
-                  <Link href="/compare" className="px-2 text-sm text-muted-foreground underline decoration-border underline-offset-4">
+                  <Link href="/compare" className="inline-flex h-8 items-center rounded-full border bg-surface px-3 text-[0.8rem] font-medium text-foreground/85 hover:border-brand/50 hover:bg-brand-soft">
                     Three assistants disagree
                   </Link>
                 </div>
               ) : undefined
             }
             extra={
-              <ContextPicker
-                context={context}
-                onContextChange={setContext}
-                profiles={profiles}
-                profileId={profileId}
-                onProfileChange={setProfileId}
-              />
+              <div className="flex flex-col gap-4">
+                <ContextPicker
+                  context={context}
+                  onContextChange={setContext}
+                  profiles={profiles}
+                  profileId={profileId}
+                  onProfileChange={setProfileId}
+                />
+                {policies.length > 0 && (
+                  <label className="flex flex-col gap-1.5 text-sm" data-tour="policy-picker">
+                    <span className="flex flex-wrap items-baseline justify-between gap-x-2">
+                      <span className="font-medium">Freshness policy</span>
+                      <Link href="/policies" className="text-xs text-muted-foreground underline-offset-4 hover:underline">
+                        What each one does
+                      </Link>
+                    </span>
+                    <NativeSelect value={policyId} onChange={(event) => setPolicyId(event.target.value)}>
+                      {policies.map((policy) => (
+                        <option key={policy.id} value={policy.id}>
+                          {policy.name}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                    <span className="text-xs text-muted-foreground">
+                      {policies.find((policy) => policy.id === policyId)?.description}
+                    </span>
+                  </label>
+                )}
+              </div>
             }
           />
           <ErrorNote message={openError} />
@@ -367,9 +405,9 @@ export function ShelfLifeApp() {
         </div>
       ) : (
         <div className="results-grid">
-          <section aria-label="Checked answer" className="flex min-w-0 flex-col gap-5 [grid-area:answer]">
-            <div className="-ml-2 flex flex-wrap items-center gap-1">
-              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={reset}>
+          <section aria-label="Checked answer" className="flex min-w-0 flex-col gap-6 [grid-area:answer]">
+            <div className="-ml-2 flex flex-wrap items-center gap-x-1 gap-y-1.5">
+              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={reset} data-tour="back">
                 <ArrowLeft aria-hidden />
                 Check another answer
               </Button>
@@ -402,8 +440,10 @@ export function ShelfLifeApp() {
             <Summary state={state} />
             {question.trim() && <p className="text-sm text-muted-foreground">{question.trim()}</p>}
             <div className="flex flex-col gap-4">
-              <Tabs tabs={TABS} value={tab} onChange={setTab} label="Answer view" />
-              <div role="tabpanel" aria-labelledby={`tab-${tab}`}>
+              <div data-tour="answer-tabs">
+                <Tabs tabs={TABS} value={tab} onChange={setTab} label="Answer view" />
+              </div>
+              <div role="tabpanel" aria-labelledby={`tab-${tab}`} data-tour="answer-panel">
                 {tab === "highlights" && (
                   <AnswerView
                     answer={state.answer}
@@ -428,8 +468,9 @@ export function ShelfLifeApp() {
 
           <aside
             ref={detailRef}
+            data-tour="claim-detail"
             aria-label="Selected claim"
-            className="min-w-0 scroll-mt-4 rounded-xl border [grid-area:detail] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"
+            className="min-w-0 scroll-mt-4 rounded-2xl border bg-card shadow-[0_1px_2px_oklch(0_0_0/0.04)] [grid-area:detail] lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"
           >
             <ClaimDetail
               key={selected?.claim.id ?? "none"}
@@ -444,7 +485,7 @@ export function ShelfLifeApp() {
             />
           </aside>
 
-          <div className="-mx-3 min-w-0 [grid-area:claims]">
+          <div className="-mx-3 min-w-0 [grid-area:claims]" data-tour="claim-list">
             <ClaimList claims={state.claims} selectedClaimId={state.selectedClaimId} onSelect={selectClaim} />
             {state.phase === "done" && state.checkId && (
               <div className="mt-6 border-t pt-6">
@@ -454,7 +495,7 @@ export function ShelfLifeApp() {
           </div>
 
           {state.liveMetrics && (
-            <div className="-mx-3 min-w-0 border-t pt-6 [grid-area:metrics]">
+            <div className="-mx-3 min-w-0 border-t pt-6 [grid-area:metrics]" data-tour="metrics">
               <MetricsPanel
                 metrics={state.liveMetrics}
                 previous={state.previousMetrics}

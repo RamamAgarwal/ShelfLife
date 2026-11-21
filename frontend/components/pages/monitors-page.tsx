@@ -195,7 +195,7 @@ function RegressionTests({ demoQuestion }: { demoQuestion?: string }) {
         description="Each run asks the model the question through Bifrost, then checks its answer. A run fails if any claim is stale or a required term is missing."
       >
         <ErrorNote message={tests.error} />
-        {tests.loading && !tests.data && <Loading />}
+        {tests.loading && !tests.data && <Loading inline />}
         {tests.data && tests.data.tests.length === 0 && <EmptyState>No tests yet. Add one to watch a question over time.</EmptyState>}
         {tests.data && tests.data.tests.length > 0 && (
           <ul className="-my-4 flex flex-col divide-y">
@@ -218,7 +218,7 @@ function RegressionTests({ demoQuestion }: { demoQuestion?: string }) {
                 setMustInclude("Acme");
               }}
             >
-              Fill demo
+              Fill example
             </Button>
           ) : undefined
         }
@@ -372,7 +372,7 @@ function BatchCheck({ demo }: { demo?: string[] }) {
         actions={
           demo?.length ? (
             <Button variant="ghost" size="sm" onClick={() => { setFromFile(null); setText(demo.join("\n---\n")); }}>
-              Fill demo
+              Fill example
             </Button>
           ) : undefined
         }
@@ -566,7 +566,7 @@ function Profiles() {
         description="Who an answer is for. Choose one on the Check page; when you change a profile later, checks made with the old version are flagged here and on the dashboard."
       >
         <ErrorNote message={profiles.error ?? error} />
-        {profiles.loading && !profiles.data && <Loading />}
+        {profiles.loading && !profiles.data && <Loading inline />}
         {profiles.data && profiles.data.profiles.length === 0 && <EmptyState>No profiles yet.</EmptyState>}
         {profiles.data && profiles.data.profiles.length > 0 && (
           <ul className="-my-3 flex flex-col divide-y">

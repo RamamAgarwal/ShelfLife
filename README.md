@@ -17,7 +17,7 @@ Built for the Geek Room Global AI Hackathon 2026, problem statement 06 (Tavily).
 
 The web app highlights each claim in the answer as it's scored. It shows "Answer said" next to "Sources now say", with dates, quotes and links. A **Corrected answer** tab shows the changes as a diff, and the whole report downloads as Markdown or JSON.
 
-**Try it without keys:** set `DEMO_MODE=true` in `.env` and every page runs on a built-in simulator with invented companies and prices. [docs/testing.md](docs/testing.md) lists what to try and what you should see.
+**Try it without keys:** set `DEMO_MODE=true` in `.env` and every page runs on a built-in simulator with invented companies and prices. The web app then starts an automatic guided walkthrough that drives every feature and explains each one beside it on screen; replay it from the corner button. [docs/testing.md](docs/testing.md) lists what to try and what you should see.
 
 ## The app
 
@@ -29,7 +29,11 @@ The web app highlights each claim in the answer as it's scored. It shows "Answer
 | **Claims** | Every claim ever checked, each with a verification passport: when it was first and last checked, by which sources, and its verdict history. |
 | **Monitors** | Regression tests that re-ask a model a question, a link checker, batch checks from pasted text or CSV, and context profiles. |
 | **Evaluation** | Precision, recall and false alarms on the human-labelled dataset, once it has run. |
-| **System** | Bifrost, virtual key, budget, cache plugin and Tavily status; the bookmarklet; the API. |
+| **Impact** | Every stale claim traced to the claims, answers and documents built on it; registered documents with corrected versions and revision history. |
+| **Graph** | The dependency freshness graph across all answers and documents: load-bearing claims, blast radius, declared dependencies. |
+| **Policies** | Freshness policy presets and your own: half-lives, re-check intervals and guard rules per kind of fact. |
+| **Autopilot** | Switch between manual and auto mode, run a cycle, and follow the agent's activity log. The same switch is in the header. |
+| **System** | Bifrost, virtual key, budget, cache plugin and Tavily status; integrations (MCP, answer guard, webhook); the bookmarklet; the API. |
 
 ## Beyond the brief
 
@@ -55,6 +59,33 @@ Answers don't only state facts. They calculate with them, assume things, and rec
 - **Availability and context.** For a chosen country, plan, currency or software environment, local claims are searched with Tavily's country setting and judged for that reader. Availability claims ("available in India") are their own kind.
 - **Answer guard.** Each check ends with advice for the app showing the answer: show it, show it with a warning, or hold it back. A stale recommendation, or half the claims stale, means hold it back.
 
+### Claims read in context, corrections that stay consistent
+
+Answers describe values as they state them: "the latest release is version 3.13, launched on October 7, 2024". Split into claims, the date reads "3.13 was launched on October 7, 2024", which is true forever. But once the version is corrected to 3.15, the date beside it describes 3.15, and is wrong.
+
+- **Coupled details are re-checked for the new value.** A claim that shares a stale claim's passage, or refers back to it, is restated about the current value ("3.15 was launched on October 7, 2024"), searched and judged like any other claim. Its verdict, evidence and new value are shown with a note saying what it was checked as.
+- **One edit per passage.** Overlapping claims are rewritten together, so the version and its date change in one consistent replacement, each with its own source. The replacement must state every current value, and a detail that couldn't be confirmed for the new value must be removed rather than left describing the wrong thing.
+- **Every claim is judged on its own timeline.** The extractor reads the question and the whole answer to decide whether each claim describes now, a past time, or a plan. "In June 2025 the latest release was 4.2" (or "Jack Dorsey is the CEO" in answer to "Who was CEO in 2020?") is checked as of that time: sources from before it lose weight, sources written later can report it, a later change never contradicts it, and it never needs re-checking. It is shown as correct or wrong *for its time*, and a wrong one is corrected with the value at that time. A planned or expected claim is checked against what happened or what is planned now.
+- **Claims are judged in their passage.** The judge sees the question and the sentences around each claim, so it reads the claim the way the answer meant it.
+- **Lists of the current state are time-sensitive.** "3.0 through 3.8 are no longer supported" is checked as a complete current list, so a newer end-of-life version makes it stale.
+
+### Downstream impact, dependencies and policies
+
+- **Downstream impact analyzer.** Register the documents an app builds from AI answers (proposals, projections, emails, reports), through the **Impact** page, `POST /api/documents` or the MCP tool. Their claims are found and linked to claim passports, by id when the app declares which claims it used and by meaning otherwise. When a claim goes stale, the impact report lists every dependent claim, answer and document with the path that links them, and each affected document gets a corrected version: values replaced, totals recalculated in code, advice re-judged, with sources. Corrections can be applied by hand or by Autopilot, and every revision is kept.
+- **Dependency freshness graph.** Claims that rely on other claims are tracked within answers (a total relies on a price; a release date describes a version) and across them: apps declare links such as "this library recommendation relies on this Python version, which relies on this OS release". The **Graph** page shows load-bearing claims and lights up a claim's blast radius.
+- **Personalised freshness.** A freshness policy sets, per kind of fact, the half-life used to score evidence age, a fixed re-check interval, and which stale categories hold an answer back. Presets cover developer assistants, production APIs, business intelligence and research; apps can save their own, choose a default, or pass `policy_id` per check.
+
+### Manual or autonomous
+
+In **manual** mode ShelfLife works when asked. In **auto** mode the Autopilot agent runs a cycle on a timer and takes every step itself: it re-verifies answers whose claims are due (by evidence age or the policy's interval) or whose context profile changed, revisits the sources each answer relied on and re-checks answers whose evidence moved or vanished, verifies documents that state unchecked claims, traces every newly stale claim downstream and corrects the documents built on it, and runs regression tests. Each cycle has a check budget, every action goes to an activity log, and impact alerts go to the webhook.
+
+### Ways to plug it in
+
+- **MCP server.** `POST /mcp` (streamable HTTP) and `uv run python -m app.mcp_stdio` expose `verify_answer`, `impact_of_claim`, `stale_claims`, `register_document`, `link_claims`, `get_claim`, `watchlist`, `autopilot` and `list_policies`, so any MCP-capable agent can check its own answer before replying.
+- **Answer guard.** `POST /api/verify` returns the advice and a corrected answer in one call.
+- **Autonomous agent.** Autopilot, above.
+- **Webhook, bookmarklet, CLI.** As below.
+
 ### Keeping answers fresh over time
 
 - **Compare AI apps.** Different assistants often give different numbers for the same fact. **Compare** lines them up and shows which app is current.
@@ -79,15 +110,16 @@ flowchart LR
     P -- "every search" --> T["Tavily Search API"]
 ```
 
-Each check runs seven stages:
+Each check runs these stages:
 
 1. **Extract** (fast model): split the answer into claims with categories, kinds, search queries and positions, plus hidden assumptions, formulas and dependencies.
 2. **Triage** (code): skip claims that can't go out of date, set aside calculations and recommendations, and cap the number of claims, keeping the fastest-changing first.
 3. **Retrieve** (Tavily): search for each claim, several at a time, with the reader's country where it matters, and drop duplicate URLs.
 4. **Adjudicate** (strong model): record each source's stance, with a quote and the current value.
-5. **Score** (code): calculate the freshness score from authority, recency and agreement.
-6. **Resolve** (code and strong model): recompute calculations with current values, re-judge recommendations whose facts changed, and decide the advice for apps.
-7. **Rewrite** (strong model and code): replace only the stale passages and flag claims that couldn't be verified.
+5. **Score** (code): calculate the freshness score from authority, recency and agreement, with the half-lives of the chosen freshness policy.
+6. **Couple** (fast model and steps 3–5): restate each detail of a now-stale value about the current value, and check it.
+7. **Resolve** (code and strong model): recompute calculations with current values, re-judge recommendations whose facts changed, and decide the advice for apps.
+8. **Rewrite** (strong model and code): replace only the stale passages, overlapping claims together, and flag claims that couldn't be verified.
 
 The web app receives an event after each stage and after each claim, so the answer fills in live. If the browser disconnects, the check keeps running and the browser can resume from the last event it saw.
 
@@ -236,6 +268,12 @@ Add `--question "..."`, `--answer-date YYYY-MM-DD`, `--deep`, `--json` or `--mar
 | `POST /api/batch` | Check up to 20 `{items: [{question?, answer}], context?}`. Returns `{batch_id}`; poll `GET /api/batch/{id}`. |
 | `GET /api/system` | Service status, settings and the cache plugin. `POST /api/system/enable-cache` turns the cache on. |
 | `GET /api/evaluation` | The latest evaluation results, if any. |
+| `GET, POST /api/policies` | Freshness policies, with `PUT` and `DELETE /api/policies/{id}`; `PUT /api/policies-default` sets the default. Checks accept `policy_id`. |
+| `GET, POST /api/documents` | Documents built from claims `{title, kind, text, check_id?, passport_ids?}`, each with its linked claims, status and corrected version. `POST /api/documents/{id}/apply` applies the correction. |
+| `GET /api/impact` | Every stale claim with its downstream impact. `GET /api/impact/{passport_id}` reports one. |
+| `GET /api/graph` | The dependency freshness graph. `GET, POST /api/graph/edges` and `DELETE /api/graph/edges/{id}` manage declared dependencies `{upstream, downstream, note}`. |
+| `GET, PUT /api/autopilot` | Autopilot mode (`manual` or `auto`), interval, per-cycle check budget, pending work and activity. `POST /api/autopilot/run` runs one cycle now. |
+| `POST /mcp` | The MCP endpoint (JSON-RPC: `initialize`, `tools/list`, `tools/call`). |
 
 ## Demo
 
@@ -293,7 +331,7 @@ With the backend running, `uv run python ../scripts/feature_tour.py` (from `back
 - Re-check dates assume no new evidence appears. They say when to look again, not when a claim becomes wrong.
 - History, the watchlist, passports, tests, profiles and comparisons are stored locally in SQLite, for one user.
 - Batch progress is kept in memory, so a batch running when the backend restarts is lost (finished checks are saved).
-- Regression tests and link checks run when you ask, not on a schedule.
+- Regression tests, link checks and re-checks run on a schedule only in auto mode; Autopilot cycles are kept in the backend process, so they stop when it stops.
 - Demo mode's data is invented. It shows how features behave, not anything about the real world.
 
 ## Roadmap
@@ -301,9 +339,6 @@ With the backend running, `uv run python ../scripts/feature_tour.py` (from `back
 Ideas that build on the same claim history, left out of the hackathon build because each needs accounts, notifications or scheduled crawling:
 
 - **Answer recall:** notify the people who received an answer when one of its claims goes stale later. The webhook covers stale claims found at check time.
-- **Scheduled re-checks:** re-run due claims, regression tests and link checks automatically, instead of on request.
-- **Downstream impact:** link claims to the documents built from them, beyond the dependencies inside one answer, and list what to update when one changes.
-- **Freshness policies per app:** let each app set its own re-check intervals and guard rules by category.
 - **Source reliability memory:** learn which sites have been right for which kinds of claims.
 - **Cross-language checks:** verify a claim against official sources in more than one language.
 - **A Bifrost plugin:** run the freshness check inside the gateway, on every response.

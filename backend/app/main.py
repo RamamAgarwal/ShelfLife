@@ -14,9 +14,10 @@ from fastapi import FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app import config, demo, history, llm, search
+from app import agent, config, demo, history, llm, search
 from app.export import to_markdown
 from app.routes import router as workspace_router
+from app.routes_freshness import router as freshness_router
 from app.jobs import CheckEvent, CheckJob, CheckStore, TooManyChecksError
 from app.models import (
     CheckCreated,
@@ -38,12 +39,17 @@ checks = CheckStore()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    if config.get_settings().demo_mode:
+        await demo.seed()
+    agent.autopilot.start()
     yield
+    await agent.autopilot.stop()
     await checks.shutdown()
 
 
-app = FastAPI(title="ShelfLife API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="ShelfLife API", version="0.4.0", lifespan=lifespan)
 app.include_router(workspace_router)
+app.include_router(freshness_router)
 
 if config.get_settings().demo_mode:
     demo.activate()
@@ -51,7 +57,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=config.get_settings().cors_origins_list,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "Last-Event-ID"],
+    allow_headers=["Content-Type", "Last-Event-ID", "Mcp-Session-Id", "Mcp-Protocol-Version"],
 )
 
 

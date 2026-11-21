@@ -5,8 +5,18 @@ import type {
   CheckSummary,
   Comparison,
   Dashboard,
+  AutopilotMode,
+  AutopilotStatus,
+  DeclaredEdge,
   DemoScenario,
+  DocumentKind,
+  DocumentView,
   EvaluationData,
+  FreshnessPolicy,
+  GraphData,
+  ImpactReport,
+  PoliciesResponse,
+  PolicyCategory,
   LinkResult,
   Passport,
   Profile,
@@ -73,7 +83,41 @@ export const workspaceApi = {
   system: () => call<SystemStatus>("/api/system"),
   enableCache: () => post<SystemStatus["cache_plugin"]>("/api/system/enable-cache", {}),
   demo: () => call<{ active: boolean; scenarios: DemoScenario[] }>("/api/demo"),
+  policies: () => call<PoliciesResponse>("/api/policies"),
+  createPolicy: (body: PolicyBody) => post<FreshnessPolicy>("/api/policies", body),
+  deletePolicy: (id: string) => call<void>(`/api/policies/${id}`, { method: "DELETE" }),
+  setDefaultPolicy: (policyId: string) =>
+    call<PoliciesResponse>("/api/policies-default", {
+      method: "PUT",
+      body: JSON.stringify({ policy_id: policyId }),
+    }),
+  documents: () => call<{ documents: DocumentView[] }>("/api/documents"),
+  createDocument: (body: { title: string; kind: DocumentKind; text: string; passport_ids?: string[] }) =>
+    post<DocumentView>("/api/documents", body),
+  applyDocument: (id: string) => post<DocumentView>(`/api/documents/${id}/apply`, {}),
+  deleteDocument: (id: string) => call<void>(`/api/documents/${id}`, { method: "DELETE" }),
+  impacts: () => call<{ items: ImpactReport[] }>("/api/impact"),
+  impact: (passportId: string) => call<ImpactReport>(`/api/impact/${encodeURIComponent(passportId)}`),
+  graph: () => call<GraphData>("/api/graph"),
+  edges: () => call<{ edges: DeclaredEdge[] }>("/api/graph/edges"),
+  addEdge: (body: { upstream: string; downstream: string; note?: string }) =>
+    post<DeclaredEdge>("/api/graph/edges", body),
+  deleteEdge: (id: string) => call<void>(`/api/graph/edges/${id}`, { method: "DELETE" }),
+  autopilot: () => call<AutopilotStatus>("/api/autopilot"),
+  setAutopilot: (body: { mode?: AutopilotMode; interval_seconds?: number; max_checks_per_cycle?: number }) =>
+    call<AutopilotStatus>("/api/autopilot", { method: "PUT", body: JSON.stringify(body) }),
+  runAutopilot: () => post<AutopilotStatus>("/api/autopilot/run", {}),
 };
+
+export interface PolicyBody {
+  name: string;
+  description?: string;
+  half_life_days: Partial<Record<PolicyCategory, number>>;
+  recheck_days: Partial<Record<PolicyCategory, number>>;
+  withhold_categories: PolicyCategory[];
+  withhold_ratio: number;
+}
+
 
 export const COUNTRIES = [
   "australia", "brazil", "canada", "france", "germany", "india", "indonesia", "italy",

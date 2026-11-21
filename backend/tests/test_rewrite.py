@@ -11,9 +11,8 @@ import pytest
 from app import cli, main
 from app.export import link, text, to_markdown
 from app.jobs import CheckStore
-from app.models import Claim, ClaimResult, Evidence
+from app.models import ChangeInfo, Claim, ClaimResult, Evidence
 from app.pipeline import rewrite
-from app.pipeline.metrics import MetricsCollector
 from app.pipeline.orchestrator import run_check
 from app.pipeline.rewrite import build_rewrite, validate_replacement
 from conftest import ANSWER, PRICE_CLAIM
@@ -126,7 +125,7 @@ def test_stale_claim_without_a_current_value_is_marked_out_of_date():
     assert rewritten.edits[0].kind == "flag"
 
 
-def test_overlapping_and_unplaced_claims_become_notes():
+def test_overlapping_claims_are_corrected_in_one_edit_and_unplaced_ones_become_notes():
     first = result("c1", "Acme costs $10 a month", "stale", "$25 a month",
                    [evidence("https://acme.example/pricing")])
     overlapping = result("c2", "costs $10", "stale", "$25", [evidence("https://news.example/a")])
@@ -135,12 +134,76 @@ def test_overlapping_and_unplaced_claims_become_notes():
     rewritten = build_rewrite(TEXT, [first, overlapping, unplaced], {"c1": "Acme costs $25 a month"})
 
     body, notes = rewritten.corrected_answer.split("\n\n")
-    assert body.startswith("Acme costs $25 a month [1].")
-    assert notes.splitlines() == [
-        "Out of date: Claim c2. Sources now say: $25. [2]",
-        "Could not verify: Claim c3.",
-    ]
-    assert [edit.kind for edit in rewritten.edits] == ["replace", "note", "note"]
+    assert body.startswith("Acme costs $25 a month [1][2].")
+    assert notes.splitlines() == ["Could not verify: Claim c3."]
+    assert [edit.kind for edit in rewritten.edits] == ["replace", "note"]
+    assert rewritten.edits[0].claim_ids == ["c1", "c2"]
+    assert rewritten.edits[0].citations == [1, 2]
+
+
+PYTHON = (
+    "The latest stable release of Python is version 3.13, launched on October 7, 2024. "
+    "Python 2 reached end-of-life on January 1, 2020."
+)
+
+
+def _python_results(date_verdict: str = "stale", date_value: str | None = "October 9, 2026"):
+    version = ClaimResult(
+        claim=Claim(id="c1", text="The latest stable release of Python is version 3.13.",
+                    span=span_of("The latest stable release of Python is version 3.13", PYTHON),
+                    category="version_api", entities=["Python"], time_sensitive=True, search_queries=["q"]),
+        verdict="stale", freshness_score=1, confidence=0.6, current_value="Python 3.15",
+        explanation="", evidence=[evidence("https://www.python.org/downloads/release/python-3150")],
+        change=ChangeInfo(change_type="superseded", old_value="version 3.13", new_value="Python 3.15",
+                          as_of=None, source_url=None),
+    )
+    launched = ClaimResult(
+        claim=Claim(id="c2", text="Python 3.13 was launched on October 7, 2024.",
+                    span=span_of("version 3.13, launched on October 7, 2024", PYTHON),
+                    category="version_api", entities=["Python"], time_sensitive=True, search_queries=["q"],
+                    depends_on=["c1"]),
+        verdict=date_verdict, freshness_score=0, confidence=0.6, current_value=date_value,
+        explanation="", evidence=[evidence("https://www.python.org/downloads/release/python-3150")],
+        coupled_to="c1", checked_as="Python 3.15 was launched on October 7, 2024.",
+        change=ChangeInfo(change_type="value_changed", old_value="October 7, 2024", new_value=date_value,
+                          as_of=None, source_url=None) if date_value else None,
+    )
+    return [version, launched]
+
+
+def test_a_value_and_its_release_date_are_corrected_together():
+    rewritten = build_rewrite(PYTHON, _python_results(), {
+        "c1": "The latest stable release of Python is version 3.15, launched on October 9, 2026",
+    })
+
+    assert rewritten.corrected_answer.startswith(
+        "The latest stable release of Python is version 3.15, launched on October 9, 2026 [1]. Python 2"
+    )
+    assert len(rewritten.edits) == 1 and rewritten.edits[0].claim_ids == ["c1", "c2"]
+
+
+def test_without_the_model_each_old_value_is_swapped_in_place():
+    rewritten = build_rewrite(PYTHON, _python_results(), {})
+
+    assert "Python 3.15, launched on October 9, 2026 [1]." in rewritten.corrected_answer
+    assert "October 7, 2024" not in rewritten.corrected_answer
+
+
+def test_a_merged_replacement_must_state_every_current_value():
+    groups, _ = rewrite._changes(PYTHON, _python_results())
+    group = groups[0]
+
+    assert rewrite._accept(PYTHON, group, "The latest stable release of Python is version 3.15, launched on October 9, 2026")
+    # Keeping the old date next to the new version is exactly the inconsistency to prevent.
+    assert not rewrite._accept(PYTHON, group, "The latest stable release of Python is version 3.15, launched on October 7, 2024")
+
+
+def test_an_unconfirmed_detail_of_a_stale_value_must_be_removed():
+    results = _python_results(date_verdict="unverified", date_value=None)
+    groups, _ = rewrite._changes(PYTHON, results)
+
+    assert rewrite._accept(PYTHON, groups[0], "The latest stable release of Python is version 3.15")
+    assert not rewrite._accept(PYTHON, groups[0], "The latest stable release of Python is version 3.15, launched on October 7, 2024")
 
 
 def test_citations_are_numbered_in_order_and_reused_for_the_same_source():
@@ -247,7 +310,8 @@ def test_rewrite_prompt_keeps_answer_text_inside_its_tags():
         explanation="", evidence=[],
     )
 
-    _, user = rewrite.build_messages(hostile, [stale], date(2026, 1, 1))
+    groups, _ = rewrite._changes(hostile, [stale])
+    _, user = rewrite.build_messages(hostile, groups, date(2026, 1, 1))
 
     assert user["content"].count("</answer>") == 1
     assert user["content"].count("</passage>") == 1

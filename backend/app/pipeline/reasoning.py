@@ -11,7 +11,6 @@ import ast
 import operator
 import re
 from collections.abc import Callable
-from datetime import date
 
 from pydantic import BaseModel
 
@@ -26,6 +25,7 @@ from app.models import (
     Recalculation,
 )
 from app.pipeline.metrics import MetricsCollector
+from app.policies import CATEGORY_LABELS, FreshnessPolicy
 from app.prompts import load_prompt, neutralise_tag
 
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
@@ -302,14 +302,20 @@ async def resolve_derived(
             results[claim_id] = result.model_copy(update={"affected_by": affected})
 
 
-def guard(results: list[ClaimResult]) -> tuple[str, str]:
+def guard(results: list[ClaimResult], policy: FreshnessPolicy | None = None) -> tuple[str, str]:
     """Advise an app whether to show the answer, warn, or hold it back."""
     checked = [r for r in results if r.verdict != "not_time_sensitive"]
     stale = [r for r in checked if r.verdict == "stale"]
+    ratio = policy.withhold_ratio if policy else 0.5
     if any(r.claim.kind == "recommendation" for r in stale):
         return "withhold", "A recommendation in this answer relies on facts that have changed."
-    if checked and len(stale) * 2 >= len(checked) and stale:
-        return "withhold", "At least half of the checked claims are out of date."
+    serious = [r for r in stale if policy and r.claim.category in policy.withhold_categories]
+    if serious:
+        label = CATEGORY_LABELS.get(serious[0].claim.category, serious[0].claim.category)
+        return "withhold", f"The {policy.name} policy holds back answers with a stale {label} claim."
+    if stale and len(stale) >= ratio * len(checked):
+        share = "half" if ratio == 0.5 else f"{round(ratio * 100)}%"
+        return "withhold", f"At least {share} of the checked claims are out of date."
     if stale:
         return "show_with_warning", f"{len(stale)} claim(s) are out of date; show the corrected answer."
     if any(r.verdict in ("uncertain", "unverified", "error") for r in checked):

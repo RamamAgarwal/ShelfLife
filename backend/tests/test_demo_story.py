@@ -125,4 +125,4 @@ async def test_demo_link_check_visits_only_invented_sites(simulator, monkeypatch
     assert statuses["https://dailycloud.example/nimbus"] == "moved"
     assert statuses["https://oldblog.example/cheap-clouds"] == "gone"
     real = next(item for item in results if item["url"] == "https://www.example.com/real-site")
-    assert real["status"] == "error" and "Demo mode" in real["detail"]
+    assert real["status"] == "error" and ".example sites" in real["detail"]
