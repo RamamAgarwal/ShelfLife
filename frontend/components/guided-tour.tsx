@@ -62,12 +62,12 @@ async function waitForElement(selector: string, timeout: number, cancelled: () =
   return null;
 }
 
-function place(target: Box | null): { top: number; left: number } {
+/** Where the card goes: beside its target, and always fully inside the window. */
+function place(target: Box | null, height: number): { top: number; left: number } {
   const width = Math.min(POPOVER_WIDTH, window.innerWidth - 32);
   if (!target) {
-    return { top: window.innerHeight / 2 - 110, left: window.innerWidth / 2 - width / 2 };
+    return { top: Math.max(16, window.innerHeight / 2 - height / 2), left: window.innerWidth / 2 - width / 2 };
   }
-  const height = 240;
   const centred = Math.min(Math.max(16, target.left + target.width / 2 - width / 2), window.innerWidth - width - 16);
   const besideTop = Math.min(Math.max(16, target.top), window.innerHeight - height - 16);
   const below = target.top + target.height + GAP;
@@ -78,7 +78,7 @@ function place(target: Box | null): { top: number; left: number } {
   if (target.left + target.width + GAP + width <= window.innerWidth - 16) {
     return { top: besideTop, left: target.left + target.width + GAP };
   }
-  return { top: window.innerHeight - height - 16, left: centred };
+  return { top: Math.max(16, window.innerHeight - height - 16), left: centred };
 }
 
 /**
@@ -96,6 +96,9 @@ export function GuidedTour() {
   const [box, setBox] = useState<Box | null>(null);
   const [remaining, setRemaining] = useState(0);
   const run = useRef(0);
+  // The card's real height, so long explanations are placed where they fit.
+  const card = useRef<HTMLDivElement>(null);
+  const [cardHeight, setCardHeight] = useState(240);
   // The preparing step waits for navigation to land, so it reads the path through a ref.
   const pathRef = useRef(pathname);
   useEffect(() => {
@@ -148,6 +151,11 @@ export function GuidedTour() {
 
     async function act(action: TourAction) {
       if ("pause" in action) return sleep(action.pause);
+      if ("open" in action) {
+        const section = await waitForElement(targetSelector(action.open), 8000, cancelled);
+        if (section instanceof HTMLDetailsElement) section.open = true;
+        return;
+      }
       if ("autopilot" in action) {
         try {
           announceAutopilot(await workspaceApi.setAutopilot({ mode: action.autopilot }));
@@ -195,6 +203,15 @@ export function GuidedTour() {
       setPhase("showing");
     })();
   }, [phase, step, router]);
+
+  // Follow the card's size as its text changes, so placement always fits it.
+  useEffect(() => {
+    const element = card.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setCardHeight(element.offsetHeight));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [phase]);
 
   // Keep the highlight on its target as the page scrolls, resizes or re-renders.
   useLayoutEffect(() => {
@@ -250,7 +267,7 @@ export function GuidedTour() {
   }
 
   const total = TOUR_STEPS.length;
-  const position = place(phase === "showing" ? box : null);
+  const position = place(phase === "showing" ? box : null, cardHeight);
   const width = Math.min(POPOVER_WIDTH, typeof window === "undefined" ? POPOVER_WIDTH : window.innerWidth - 32);
   const progress = phase === "showing" ? 1 - remaining / readingTime(step) : 0;
 
@@ -270,6 +287,7 @@ export function GuidedTour() {
         />
       )}
       <div
+        ref={card}
         role="dialog"
         aria-live="polite"
         aria-label={`Tour step ${index + 1} of ${total}: ${step.title}`}

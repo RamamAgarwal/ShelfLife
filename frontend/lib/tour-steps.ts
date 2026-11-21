@@ -10,6 +10,8 @@ export type TourAction =
   | { click: string; optional?: boolean }
   | { waitFor: string; timeout?: number }
   | { pause: number }
+  /** Expand a collapsed <details> section, such as the context panel. */
+  | { open: string }
   | { autopilot: "manual" | "auto" };
 
 export interface TourStep {
@@ -100,11 +102,16 @@ export const TOUR_STEPS: TourStep[] = [
     duration: 12000,
   },
   {
+    id: "context",
+    actions: [{ click: "back" }, { click: "example-cloud" }, { pause: 300 }, { open: "context-picker" }, { pause: 300 }],
+    target: "context-picker",
+    title: "Checked for the reader it was written for",
+    body: "This answer is for a startup in India, so the country is set here. Local prices, availability and laws are searched and judged for that reader, and a claim true in general but not for them is flagged. Plan, environment and currency work the same way; a saved profile flags old checks when it changes.",
+    duration: 12000,
+  },
+  {
     id: "cloud",
     actions: [
-      { click: "back" },
-      { click: "example-cloud" },
-      { pause: 300 },
       { click: "check-button" },
       { waitFor: "summary-done", timeout: 45000 },
       { click: "#tab-dependencies" },

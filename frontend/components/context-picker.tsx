@@ -28,7 +28,11 @@ export function ContextPicker({
     onContextChange({ ...context, [key]: value || null });
 
   return (
-    <details className="group rounded-lg border px-3 py-2.5" open={summary.length > 0 || undefined}>
+    <details
+      className="group rounded-lg border px-3 py-2.5"
+      open={summary.length > 0 || undefined}
+      data-tour="context-picker"
+    >
       <summary className="flex cursor-pointer items-center gap-2 text-sm select-none">
         <MapPin className="size-4 text-muted-foreground" aria-hidden />
         <span className="font-medium">Context</span>

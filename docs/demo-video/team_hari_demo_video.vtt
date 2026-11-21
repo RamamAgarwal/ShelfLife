@@ -1,0 +1,272 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:04.771
+This is ShelfLife, which checks whether
+the claims in an AI answer are still true.
+
+00:00:04.771 --> 00:00:06.400
+Let's start the guided tour.
+
+00:00:06.400 --> 00:00:10.820
+AI answers state prices, versions and
+office holders with full confidence,
+
+00:00:10.820 --> 00:00:12.194
+even after they change.
+
+00:00:12.194 --> 00:00:15.300
+This tour walks through the whole system
+on its own.
+
+00:00:15.300 --> 00:00:19.336
+The sidebar groups everything: verify
+answers and compare apps,
+
+00:00:19.336 --> 00:00:23.500
+keep them fresh downstream, and see the
+results in the dashboard.
+
+00:00:23.500 --> 00:00:27.084
+Here's an assistant's answer about the
+latest Orion release,
+
+00:00:27.084 --> 00:00:29.175
+and which versions are unsupported.
+
+00:00:29.175 --> 00:00:32.700
+Paste from any model, use the bookmarklet,
+or call the API.
+
+00:00:32.700 --> 00:00:36.441
+Different apps need different shelf lives.
+
+00:00:36.441 --> 00:00:43.300
+A freshness policy sets how fast evidence
+ages and what holds an answer back.
+
+00:00:43.300 --> 00:00:46.100
+Now we run the check.
+
+00:00:46.100 --> 00:00:48.909
+The answer is split into self-contained
+claims.
+
+00:00:48.909 --> 00:00:53.451
+Each one is searched, every source's
+stance is judged with a verified quote,
+
+00:00:53.451 --> 00:00:56.200
+and the freshness score is calculated in
+code.
+
+00:00:56.200 --> 00:01:02.621
+The answer scores 1 out of 100, and apps
+get clear advice: show it, warn,
+
+00:01:02.621 --> 00:01:04.029
+or hold it back.
+
+00:01:04.029 --> 00:01:05.700
+Here, hold it back.
+
+00:01:05.700 --> 00:01:07.100
+Look at the release date.
+
+00:01:07.100 --> 00:01:11.485
+On its own, “Orion 4.2 was launched on
+March 4, 2025” is true forever.
+
+00:01:11.485 --> 00:01:13.740
+But it describes the latest release,
+
+00:01:13.740 --> 00:01:18.000
+so ShelfLife re-checked the date for 4.4
+and found October 11, 2026.
+
+00:01:18.000 --> 00:01:23.810
+The corrected answer changes the version
+and its date together, each with a source,
+
+00:01:23.810 --> 00:01:26.680
+and adds 3.x to the unsupported versions.
+
+00:01:26.680 --> 00:01:29.200
+Everything else stays word for word.
+
+00:01:29.200 --> 00:01:32.700
+Next, an answer about June 2025.
+
+00:01:32.700 --> 00:01:35.411
+Each claim is judged on its own timeline.
+
+00:01:35.411 --> 00:01:39.775
+“In June 2025 the latest release was 4.2”
+is correct for its time,
+
+00:01:39.775 --> 00:01:44.800
+while a June 2025 price that was wrong
+even then is corrected for that time.
+
+00:01:44.800 --> 00:01:48.400
+Now a cloud hosting recommendation.
+
+00:01:48.400 --> 00:01:50.990
+It rests on two prices, a calculated
+total,
+
+00:01:50.990 --> 00:01:53.822
+a hidden seat-limit assumption and an API
+call.
+
+00:01:53.822 --> 00:01:58.400
+When a price changes, the total is
+recalculated and the advice is re-judged.
+
+00:01:58.400 --> 00:02:00.900
+Sources go away too.
+
+00:02:00.900 --> 00:02:05.940
+ShelfLife revisits every page it relied on
+and flags pages that moved, were deleted,
+
+00:02:05.940 --> 00:02:07.800
+or no longer contain the quote.
+
+00:02:07.800 --> 00:02:12.215
+Every model call goes through Bifrost,
+with fallbacks, caching and a budget.
+
+00:02:12.215 --> 00:02:15.700
+Calls, tokens, cost and cache hits are
+shown for each stage.
+
+00:02:15.700 --> 00:02:17.200
+On to downstream impact.
+
+00:02:17.200 --> 00:02:19.669
+A stale fact rarely stays in one answer.
+
+00:02:19.669 --> 00:02:23.928
+The old $20 price was also used in a
+proposal, a budget and an email.
+
+00:02:23.928 --> 00:02:27.200
+Each stale claim is traced to everything
+built on it.
+
+00:02:27.200 --> 00:02:31.930
+Every affected document gets a corrected
+version with sources: prices replaced,
+
+00:02:31.930 --> 00:02:34.385
+totals recalculated and advice re-judged.
+
+00:02:34.385 --> 00:02:36.900
+Apply it yourself, or let Autopilot do it.
+
+00:02:36.900 --> 00:02:41.082
+The dependency graph shows every claim,
+what it relies on,
+
+00:02:41.082 --> 00:02:44.688
+and the documents built on it, across all
+answers.
+
+00:02:44.688 --> 00:02:47.500
+Dashed lines are declared dependencies.
+
+00:02:47.500 --> 00:02:52.118
+Select a load-bearing claim, and
+everything downstream of it lights up:
+
+00:02:52.118 --> 00:02:54.200
+what may be wrong if it changes.
+
+00:02:54.200 --> 00:02:59.895
+Policies come as presets for developer
+assistants, production APIs,
+
+00:02:59.895 --> 00:03:04.400
+business intelligence and research, or
+save your own.
+
+00:03:04.400 --> 00:03:07.173
+In manual mode checks run when you ask.
+
+00:03:07.173 --> 00:03:10.800
+In auto mode, ShelfLife runs end to end on
+its own.
+
+00:03:10.800 --> 00:03:14.400
+Let's switch on auto mode.
+
+00:03:14.400 --> 00:03:19.173
+Autopilot re-verifies due claims, revisits
+sources, verifies new documents,
+
+00:03:19.173 --> 00:03:20.827
+traces newly stale claims,
+
+00:03:20.827 --> 00:03:24.836
+corrects the documents built on them and
+runs regression tests.
+
+00:03:24.836 --> 00:03:26.300
+Every action is logged.
+
+00:03:26.300 --> 00:03:33.200
+The same switch sits at the bottom of the
+sidebar on every page.
+
+00:03:33.200 --> 00:03:37.000
+Now let's compare AI apps.
+
+00:03:37.000 --> 00:03:40.832
+Three assistants gave different numbers
+for the same question.
+
+00:03:40.832 --> 00:03:45.900
+Every version is judged against the same
+sources, so you see which app is current.
+
+00:03:45.900 --> 00:03:50.192
+The dashboard shows checks over time,
+verdicts by kind of fact,
+
+00:03:50.192 --> 00:03:52.100
+answers held back and usage.
+
+00:03:52.100 --> 00:03:57.477
+Every claim gets a verification passport:
+a stable ID and a record of every check,
+
+00:03:57.477 --> 00:04:00.100
+its sources and how its verdict changed.
+
+00:04:00.100 --> 00:04:04.762
+Monitors cover regression tests that re-
+ask a model, link checks,
+
+00:04:04.762 --> 00:04:07.200
+batch checks and context profiles.
+
+00:04:07.200 --> 00:04:09.499
+ShelfLife plugs into any agent.
+
+00:04:09.499 --> 00:04:14.469
+It's a tool server over MCP, a guard in
+front of any app's answers,
+
+00:04:14.469 --> 00:04:18.400
+a webhook source, and an autonomous agent
+of its own.
+
+00:04:18.400 --> 00:04:24.395
+That's ShelfLife: find what went stale,
+fix it consistently, follow it downstream,
+
+00:04:24.395 --> 00:04:27.100
+and keep everything fresh on its own.
+
+00:04:27.100 --> 00:04:36.600
+Thanks for watching.
